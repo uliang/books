@@ -1,5 +1,5 @@
-# Ruff (lint + format) and djlint (Jinja templates) run on every commit,
-# all branches. pytest is gated to the main branch only.
+# Ruff (lint + format), djlint (Jinja templates), and import-linter (context
+# boundaries) run on every commit, all branches. pytest is gated to main only.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.13
@@ -15,6 +15,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: import-linter
+        name: import-linter (context boundaries, ADR-0013)
+        entry: uv run lint-imports
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: pytest-main-only
         name: pytest (main branch only)
         entry: >-

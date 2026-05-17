@@ -5,7 +5,9 @@ description = "Self service accounting application with MCP and web interfaces"
 readme = "README.md"
 authors = [{ name = "Tang U-Liang", email = "uliang6482@gmail.com" }]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "sqlalchemy>=2.0.36",
+]
 
 [project.scripts]
 books = "books:main"
@@ -19,6 +21,8 @@ dev = [
     "djlint>=1.36.4",
     "pre-commit>=4.6.0",
     "pytest>=9.0.3",
+    "pytest-timeout>=2.3.1",
+    "import-linter>=2.1",
     "ruff>=0.15.13",
 ]
 
@@ -32,7 +36,65 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra --timeout=30"
+
+# Enforced context boundaries (ADR-0013). Boundary violations fail the gate.
+# Run: `uv run lint-imports`. Table ownership stays a runtime-SQL convention
+# (not importable), contained to the single Reporting carve-out.
+[tool.importlinter]
+root_package = "books"
+
+# platform/ is plumbing only — NO domain concepts. It must never depend on a
+# bounded context (ADR-0013 "platform/ is plumbing only").
+[[tool.importlinter.contracts]]
+name = "platform is technical infra only (no domain dependencies)"
+type = "forbidden"
+source_modules = ["books.platform"]
+forbidden_modules = [
+    "books.party",
+    "books.invoicing",
+    "books.general_ledger",
+    "books.bank_reconciliation",
+    "books.reporting",
+]
+
+# Each context is private to itself. Cross-context flow is allowed ONLY through
+# published events (ADR-0011) or a context's query API (ADR-0013) — never by
+# reaching into another context's aggregates/tables. The two sanctioned seams
+# below are whitelisted explicitly so any *new* cross-context edge fails the
+# gate (ADR-0013: an unenforced boundary erodes silently).
+[[tool.importlinter.contracts]]
+name = "bounded contexts are independent (events/query-API seams only)"
+type = "independence"
+modules = [
+    "books.party",
+    "books.invoicing",
+    "books.general_ledger",
+    "books.bank_reconciliation",
+]
+ignore_imports = [
+    # ADR-0011: ledger is event-fed; consuming another context's published
+    # events is the sanctioned synchronous-integration seam.
+    "books.general_ledger.service -> books.invoicing.events",
+    # ADR-0013: reconciliation reads ledger postings through GL's query API
+    # (PostingView), not its tables/aggregates.
+    "books.bank_reconciliation.service -> books.general_ledger.service",
+]
+
+# Reporting is the read-model leaf (ADR-0007/0010/0014/0016): it may join
+# across contexts, but nothing may depend on it. Only the composition root
+# wires it.
+[[tool.importlinter.contracts]]
+name = "reporting is a read-model leaf (nothing depends on it)"
+type = "forbidden"
+source_modules = [
+    "books.platform",
+    "books.party",
+    "books.invoicing",
+    "books.general_ledger",
+    "books.bank_reconciliation",
+]
+forbidden_modules = ["books.reporting"]
 
 [tool.djlint]
 profile = "jinja"

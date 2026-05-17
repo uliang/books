@@ -1,0 +1,64 @@
+"""Reporting application API (ADR-0016) — the read model.
+
+Reports are computed on demand by joining the owning contexts' query APIs
+(Reporting is the sanctioned cross-context reader, ADR-0013); there is no
+materialized projection. "Cleared" is derived: a bank posting is cleared iff
+a Match references it (ADR-0010), so confirmed cash (invariant 3) and the
+tie-out (invariant 4) are both joins, never stored reads.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from books.bank_reconciliation.service import BankReconciliationService
+from books.general_ledger.service import LedgerService
+from books.platform.money import Money
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationReport:
+    statement_closing: Money
+    ledger_bank_balance: Money
+    confirmed_cash: Money
+    difference: Money
+    reconciling_items: list[int]  # uncleared bank posting refs
+    unexplained_lines: list[int]  # statement line refs with no match
+
+
+class ReportingService:
+    def __init__(
+        self,
+        ledger: LedgerService,
+        recon: BankReconciliationService,
+    ) -> None:
+        self._ledger = ledger
+        self._recon = recon
+
+    def reconciliation_report(self, account: str, period: str) -> ReconciliationReport:
+        ledger_balance = self._ledger.account_balance(code=account)
+        statement_closing = self._recon.statement_closing(account, period)
+        matched_postings = self._recon.matched_posting_refs()
+
+        postings = self._ledger.postings_for(code=account)
+        confirmed_cash = Money.myr(
+            sum(p.amount.minor_units for p in postings if p.ref in matched_postings)
+        )
+        reconciling_items = [p.ref for p in postings if p.ref not in matched_postings]
+
+        matched_lines = self._recon.matched_line_refs()
+        unexplained_lines = [
+            ln.ref
+            for ln in self._recon.statement_lines(account, period)
+            if ln.ref not in matched_lines
+        ]
+
+        difference = statement_closing - confirmed_cash
+        return ReconciliationReport(
+            statement_closing=statement_closing,
+            ledger_bank_balance=ledger_balance,
+            confirmed_cash=confirmed_cash,
+            difference=difference,
+            reconciling_items=reconciling_items,
+            unexplained_lines=unexplained_lines,
+        )

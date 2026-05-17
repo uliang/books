@@ -1,0 +1,44 @@
+[project]
+name = "books"
+version = "0.1.0"
+description = "Self service accounting application with MCP and web interfaces"
+readme = "README.md"
+authors = [{ name = "Tang U-Liang", email = "uliang6482@gmail.com" }]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+books = "books:main"
+
+[build-system]
+requires = ["uv_build>=0.8.4,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "djlint>=1.36.4",
+    "pre-commit>=4.6.0",
+    "pytest>=9.0.3",
+    "ruff>=0.15.13",
+]
+
+[tool.ruff]
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# E/F: pyflakes+pycodestyle, I: isort, UP: pyupgrade, B: bugbear, SIM: simplify
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.djlint]
+profile = "jinja"
+extension = "html"
+# Flask default template/static locations
+exclude = ".venv,venv,migrations"
+# H005/H016/H030/H031: full-document SEO/lang rules (noisy for partials & macros)
+# T002/T003: template-syntax rules
+ignore = "H005,H016,H030,H031,T002,T003"

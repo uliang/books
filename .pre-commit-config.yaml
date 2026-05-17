@@ -1,0 +1,26 @@
+# Ruff (lint + format) and djlint (Jinja templates) run on every commit,
+# all branches. pytest is gated to the main branch only.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.13
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/djlint/djLint
+    rev: v1.36.4
+    hooks:
+      - id: djlint-jinja
+
+  - repo: local
+    hooks:
+      - id: pytest-main-only
+        name: pytest (main branch only)
+        entry: >-
+          bash -c 'if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ];
+          then uv run pytest;
+          else echo "skipping pytest (not on main branch)"; fi'
+        language: system
+        pass_filenames: false
+        always_run: true

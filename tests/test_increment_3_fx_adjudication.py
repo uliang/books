@@ -74,3 +74,48 @@ def test_foreign_invoice_underpaid_in_myr_is_owner_adjudicated_as_realized_fx():
     )
     assert app.ledger.account_balance(code="AR") == Money.myr(0)
     assert app.ledger.account_balance(code="FX Loss") == Money.myr(20_00)
+
+
+def test_foreign_invoice_underpaid_adjudicated_still_owes_leaves_ar_open():
+    """The other adjudication branch (ADR-0005): the owner judges the MYR
+    gap a genuine *underpayment*, not adverse FX. No FX is recognized — the
+    Ledger posts nothing, AR stays open for the shortfall, and the customer
+    still owes it. The system never collapses the ambiguity on its own."""
+    app = create_app()
+
+    acme = app.party.register_party(name="Acme", role="customer")
+    app.ledger.create_account(code="Bank", name="Bank", type="asset")
+    app.ledger.create_account(
+        code="AR", name="Accounts Receivable", type="asset", control=True
+    )
+    app.ledger.create_account(code="Revenue", name="Revenue", type="income")
+    app.ledger.create_account(code="FX Loss", name="Realized FX Loss", type="expense")
+
+    inv = app.invoicing.issue_invoice(
+        number=1,
+        party_id=acme.id,
+        amount=Money(1000_00, Currency.SGD),
+        issued_on=date(2026, 1, 10),
+        rate=Decimal("3.20"),
+    )
+    app.invoicing.mark_paid(
+        invoice_id=inv.id,
+        paid_on=date(2026, 1, 20),
+        banked=Money.myr(3180_00),
+    )
+    assert app.ledger.account_balance(code="AR") == Money.myr(20_00)
+
+    # --- Then: owner adjudicates "still owes" --------------------------
+    # No guided-journal template fires: AR is unchanged and no FX loss is
+    # recognized. The MYR 20 remains a live receivable.
+    app.invoicing.adjudicate_settlement(
+        invoice_id=inv.id,
+        outcome="still_owes",
+        on=date(2026, 1, 25),
+    )
+    assert app.ledger.account_balance(code="AR") == Money.myr(20_00)
+    assert app.ledger.account_balance(code="FX Loss") == Money.myr(0)
+
+    # The picture still surfaces the open shortfall for follow-up.
+    picture = app.invoicing.settlement_picture(inv.id)
+    assert picture.shortfall == Money.myr(20_00)

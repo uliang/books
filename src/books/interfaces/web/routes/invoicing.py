@@ -39,7 +39,7 @@ def paid_form(invoice_id: int):
 @invoicing_bp.post("/<int:invoice_id>/mark-paid")
 def mark_paid(invoice_id: int):
     books = current_books()
-    raw = request.form.get("banked")
+    raw = (request.form.get("banked") or "").strip() or None
     banked = money_from(raw, "MYR") if raw else None
     books.invoicing.mark_paid(
         invoice_id=invoice_id,

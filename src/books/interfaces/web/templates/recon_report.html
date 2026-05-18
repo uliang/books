@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Reconciliation — {{ account }} {{ period }}</h1>
+    <table>
+        <tr>
+            <th>Statement closing</th>
+            <td>
+                {{ "%.2f"|format(report.statement_closing.minor_units / 100) }}
+                {{ report.statement_closing.currency.value }}
+            </td>
+        </tr>
+        <tr>
+            <th>Ledger bank balance</th>
+            <td>
+                {{ "%.2f"|format(report.ledger_bank_balance.minor_units / 100) }}
+                {{ report.ledger_bank_balance.currency.value }}
+            </td>
+        </tr>
+        <tr>
+            <th>Confirmed cash</th>
+            <td>
+                {{ "%.2f"|format(report.confirmed_cash.minor_units / 100) }}
+                {{ report.confirmed_cash.currency.value }}
+            </td>
+        </tr>
+        <tr>
+            <th>Difference</th>
+            <td>
+                {{ "%.2f"|format(report.difference.minor_units / 100) }}
+                {{ report.difference.currency.value }}
+            </td>
+        </tr>
+    </table>
+    {% if report.difference.minor_units == 0 %}
+        <p>
+            <strong>Reconciled.</strong>
+        </p>
+    {% else %}
+        <p>
+            <strong>Not reconciled.</strong>
+        </p>
+    {% endif %}
+    <h2>Reconciling items</h2>
+    {% if report.reconciling_items %}
+        <table>
+            <tr>
+                <th>Ref</th>
+                <th>Amount</th>
+                <th>Age (days)</th>
+                <th>Classification</th>
+            </tr>
+            {% for it in report.reconciling_items %}
+                <tr>
+                    <td>{{ it.ref }}</td>
+                    <td>
+                        {{ "%.2f"|format(it.amount.minor_units / 100) }}
+                        {{ it.amount.currency.value }}
+                    </td>
+                    <td>{{ it.age_days }}</td>
+                    <td>{{ it.classification }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    {% else %}
+        <p>No reconciling items</p>
+    {% endif %}
+{% endblock %}

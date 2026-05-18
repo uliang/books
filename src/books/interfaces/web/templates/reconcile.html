@@ -38,4 +38,7 @@
     {% else %}
         <p>No proposals</p>
     {% endif %}
+    <p>
+        <a href="{{ url_for('reports.reconciliation', account=account, period=period) }}">View reconciliation report</a>
+    </p>
 {% endblock %}

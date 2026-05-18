@@ -2,6 +2,7 @@
 {% block body %}
     <h1>books</h1>
     <h2>Parties</h2>
+    <a href="{{ url_for('setup.parties_form') }}">Add party</a>
     {% if parties %}
         <ul>
             {% for p in parties %}<li>{{ p.name }}</li>{% endfor %}
@@ -9,6 +10,7 @@
     {% else %}
         <p>No parties yet</p>
     {% endif %}
+    <a href="{{ url_for('setup.accounts_form') }}">Add account</a>
     <h2>Accounts</h2>
     {% if accounts %}
         <ul>
@@ -17,4 +19,17 @@
     {% else %}
         <p>No accounts yet</p>
     {% endif %}
+    <h2>Reconciliation report</h2>
+    <form method="get"
+          action="{{ url_for('reports.reconciliation_redirect') }}">
+        <label>
+            Account
+            <input name="account" value="Bank" required>
+        </label>
+        <label>
+            Period (YYYY-MM)
+            <input name="period" required>
+        </label>
+        <button type="submit">View report</button>
+    </form>
 {% endblock %}

@@ -3,6 +3,12 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 <header>
     <a href="{{ url_for('setup.landing') }}">books</a>
+    <nav>
+        <a href="{{ url_for('setup.parties_form') }}">Parties</a>
+        <a href="{{ url_for('setup.accounts_form') }}">Accounts</a>
+        <a href="{{ url_for('invoicing.issue_form') }}">Issue invoice</a>
+        <a href="{{ url_for('reconciliation.import_form') }}">Import statement</a>
+    </nav>
 </header>
 {% with messages = get_flashed_messages() %}
     {% if messages %}

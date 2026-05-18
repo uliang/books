@@ -28,6 +28,10 @@ REVENUE = "Revenue"
 BANK = "Bank"
 
 
+def _period_of(d: date) -> str:
+    return f"{d.year:04d}-{d.month:02d}"
+
+
 class _Account(Base):
     __tablename__ = "gl_account"
 
@@ -46,6 +50,16 @@ class _Entry(Base):
     # Provenance (ADR-0012): what caused this entry.
     source_kind: Mapped[str] = mapped_column(String)
     source_id: Mapped[str] = mapped_column(String)
+
+
+class _PeriodClose(Base):
+    """A soft-closed period (ADR-0009). Its presence locks new economic
+    entries dated into that period; clearance is orthogonal and unaffected."""
+
+    __tablename__ = "gl_period_close"
+
+    period: Mapped[str] = mapped_column(String, primary_key=True)  # YYYY-MM
+    kind: Mapped[str] = mapped_column(String)  # "soft"
 
 
 class _Posting(Base):
@@ -87,6 +101,19 @@ class LedgerService:
         with self._db.unit_of_work() as session:
             session.add(_Account(code=code, name=name, type=type, control=control))
 
+    def soft_close(self, period: str) -> None:
+        """Lock ``period`` (YYYY-MM) against new economic entries (ADR-0009).
+
+        Never blocks on uncleared bank postings — clearance is the
+        orthogonal axis and is deliberately not consulted here. Idempotent.
+        """
+        with self._db.unit_of_work() as session:
+            already = session.execute(
+                select(_PeriodClose).where(_PeriodClose.period == period)
+            ).scalar_one_or_none()
+            if already is None:
+                session.add(_PeriodClose(period=period, kind="soft"))
+
     def _post(
         self,
         session,
@@ -97,6 +124,14 @@ class LedgerService:
         source_id: str,
         legs: list[tuple[str, int, int | None, str | None]],
     ) -> None:
+        period = _period_of(on)
+        if (
+            session.execute(
+                select(_PeriodClose).where(_PeriodClose.period == period)
+            ).scalar_one_or_none()
+            is not None
+        ):
+            raise ValueError(f"period {period} is closed: cannot post on {on}")
         entry = _Entry(
             date=on,
             narrative=narrative,

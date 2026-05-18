@@ -1,4 +1,7 @@
-"""Request -> domain parsing. Kept tiny and explicit (no WTForms)."""
+"""Request -> domain parsing. Kept tiny and explicit (no WTForms).
+
+First used by the invoicing/reconciliation routes (Task 4 onward).
+"""
 
 from __future__ import annotations
 

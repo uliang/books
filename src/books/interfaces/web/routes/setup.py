@@ -15,6 +15,8 @@ setup_bp = Blueprint("setup", __name__, url_prefix="")
 
 
 def _seen(kind: str) -> list:
+    # Stored on the Flask app instance, so it is fresh per create_web_app()
+    # (and thus per test_client()); not shared across app instances.
     return current_app.config.setdefault("_SEEN", {}).setdefault(kind, [])
 
 
@@ -47,11 +49,12 @@ def accounts_form():
 @setup_bp.post("/setup/accounts")
 def create_account():
     code = request.form["code"]
+    name = request.form["name"]
     current_books().ledger.create_account(
         code=code,
-        name=request.form["name"],
+        name=name,
         type=request.form["type"],
         control=bool(request.form.get("control")),
     )
-    _seen("accounts").append({"code": code, "name": request.form["name"]})
+    _seen("accounts").append({"code": code, "name": name})
     return redirect(url_for("setup.landing"))

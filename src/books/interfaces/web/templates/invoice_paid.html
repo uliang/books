@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Invoice {{ invoice_id }}</h1>
+    {% if picture is none %}
+        <form method="post"
+              action="{{ url_for('invoicing.mark_paid', invoice_id=invoice_id) }}">
+            <label>
+                Paid on
+                <input name="paid_on" type="date" required>
+            </label>
+            <label>
+                Banked MYR (blank = full carrying)
+                <input name="banked">
+            </label>
+            <button type="submit">Mark paid</button>
+        </form>
+    {% else %}
+        <table>
+            <tr>
+                <th>Transaction</th>
+                <td>{{ picture.transaction_amount.minor_units }}</td>
+            </tr>
+            <tr>
+                <th>Carrying MYR</th>
+                <td>{{ picture.carrying.minor_units }}</td>
+            </tr>
+            <tr>
+                <th>Banked MYR</th>
+                <td>{{ picture.banked.minor_units }}</td>
+            </tr>
+            <tr>
+                <th>Shortfall MYR</th>
+                <td>{{ picture.shortfall.minor_units }}</td>
+            </tr>
+        </table>
+        {% if picture.shortfall.minor_units > 0 %}
+            <h2>Adjudicate the shortfall</h2>
+            <form method="post"
+                  action="{{ url_for('invoicing.adjudicate', invoice_id=invoice_id) }}">
+                <label>
+                    Outcome
+                    <select name="outcome">
+                        <option value="settled_in_full">settled in full (realized FX loss)</option>
+                        <option value="still_owes">still owes (AR stays open)</option>
+                    </select>
+                </label>
+                <label>
+                    On
+                    <input name="on" type="date" required>
+                </label>
+                <button type="submit">Adjudicate</button>
+            </form>
+        {% endif %}
+    {% endif %}
+{% endblock %}

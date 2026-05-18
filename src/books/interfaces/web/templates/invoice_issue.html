@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Issue invoice</h1>
+    <form method="post" action="{{ url_for('invoicing.issue') }}">
+        <label>
+            Number
+            <input name="number" type="number" required>
+        </label>
+        <label>
+            Party id
+            <input name="party_id" type="number" required>
+        </label>
+        <label>
+            Amount
+            <input name="amount" required>
+        </label>
+        <label>
+            Currency
+            <select name="currency">
+                <option value="MYR">MYR</option>
+                <option value="SGD">SGD</option>
+            </select>
+        </label>
+        <label>
+            Issued on
+            <input name="issued_on" type="date" required>
+        </label>
+        <label>
+            Booking rate
+            <input name="rate" value="1" required>
+        </label>
+        <button type="submit">Issue</button>
+    </form>
+{% endblock %}

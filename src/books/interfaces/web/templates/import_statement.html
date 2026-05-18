@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Import bank statement</h1>
+    <form method="post"
+          action="{{ url_for('reconciliation.import_statement') }}">
+        <label>
+            Account
+            <input name="account" value="Bank" required>
+        </label>
+        <label>
+            Period (YYYY-MM)
+            <input name="period" required>
+        </label>
+        <label>
+            Opening
+            <input name="opening" value="0.00" required>
+        </label>
+        <label>
+            Closing
+            <input name="closing" required>
+        </label>
+        <label>
+            CSV (date,amount,description; header row skipped)
+            <textarea name="raw" rows="6" cols="50" required></textarea>
+        </label>
+        <button type="submit">Import</button>
+    </form>
+{% endblock %}

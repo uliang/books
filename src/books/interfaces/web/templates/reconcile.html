@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Reconcile {{ account }} — {{ period }}</h1>
+    <h2>Statement lines</h2>
+    <table>
+        <tr>
+            <th>Ref</th>
+            <th>Date</th>
+            <th>Amount</th>
+            <th>Description</th>
+        </tr>
+        {% for ln in lines %}
+            <tr>
+                <td>{{ ln.ref }}</td>
+                <td>{{ ln.date }}</td>
+                <td>
+                    {{ "%.2f"|format(ln.amount.minor_units / 100) }}
+                    {{ ln.amount.currency.value }}
+                </td>
+                <td>{{ ln.description }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+    <h2>Proposed matches</h2>
+    {% if proposals %}
+        {% for p in proposals %}
+            <form method="post" action="{{ url_for('reconciliation.confirm') }}">
+                <input type="hidden"
+                       name="statement_line_ref"
+                       value="{{ p.statement_line_ref }}">
+                <input type="hidden"
+                       name="ledger_posting_ref"
+                       value="{{ p.ledger_posting_ref }}">
+                line {{ p.statement_line_ref }} ↔ posting {{ p.ledger_posting_ref }}
+                <button type="submit">Confirm</button>
+            </form>
+        {% endfor %}
+    {% else %}
+        <p>No proposals</p>
+    {% endif %}
+{% endblock %}

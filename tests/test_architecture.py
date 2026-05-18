@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
 
 
 def test_context_boundary_contracts_hold() -> None:
@@ -22,3 +24,10 @@ def test_context_boundary_contracts_hold() -> None:
         "Context-boundary contracts broken (ADR-0013):\n"
         f"{result.stdout}\n{result.stderr}"
     )
+
+
+def test_interfaces_boundary_contracts_declared() -> None:
+    cfg = tomllib.loads(Path("pyproject.toml").read_text())
+    names = {c["name"] for c in cfg["tool"]["importlinter"]["contracts"]}
+    assert "interfaces is an outermost leaf (nothing depends on it)" in names
+    assert any(n.startswith("interfaces touches only the service seam") for n in names)

@@ -97,6 +97,38 @@ source_modules = [
 ]
 forbidden_modules = ["books.reporting"]
 
+# interfaces/ is the outermost adapter leaf: nothing in the domain may
+# depend on it (design: web-interface-tracer-slice; ADR-0013 discipline).
+[[tool.importlinter.contracts]]
+name = "interfaces is an outermost leaf (nothing depends on it)"
+type = "forbidden"
+source_modules = [
+    "books.platform",
+    "books.party",
+    "books.invoicing",
+    "books.general_ledger",
+    "books.bank_reconciliation",
+    "books.reporting",
+]
+forbidden_modules = ["books.interfaces"]
+
+# interfaces/ may use the composition root + service APIs, but must never
+# reach into a context's private persistence/aggregate modules. Each such
+# private module is named here as a forbidden target (incremental
+# whitelist discipline, same as the cross-context seam list above).
+[[tool.importlinter.contracts]]
+name = "interfaces touches only the service seam (no platform plumbing)"
+type = "forbidden"
+source_modules = ["books.interfaces"]
+forbidden_modules = ["books.platform.db", "books.platform.events"]
+ignore_imports = [
+    # The composition root (books) imports platform plumbing — that is
+    # correct by design and governed by the 'platform is plumbing' contract.
+    # The transitive path books.interfaces -> books -> books.platform.* is
+    # sanctioned; only a *direct* interfaces -> platform edge is prohibited.
+    "books.interfaces.web.app -> books",
+]
+
 [tool.djlint]
 profile = "jinja"
 extension = "html"

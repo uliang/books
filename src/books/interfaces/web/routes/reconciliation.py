@@ -51,9 +51,8 @@ def view(account: str, period: str):
 
 @reconciliation_bp.post("/confirm")
 def confirm():
-    f = request.form
     current_books().bank_reconciliation.confirm_match(
-        statement_line_ref=int(f["statement_line_ref"]),
-        ledger_posting_ref=int(f["ledger_posting_ref"]),
+        statement_line_ref=int(request.form["statement_line_ref"]),
+        ledger_posting_ref=int(request.form["ledger_posting_ref"]),
     )
     return redirect(request.referrer or url_for("setup.landing"))

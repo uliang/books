@@ -3,6 +3,7 @@
     <h1>Import bank statement</h1>
     <form method="post"
           action="{{ url_for('reconciliation.import_statement') }}">
+        {# "Bank" is a tracer-scope convenience default, not a configured account #}
         <label>
             Account
             <input name="account" value="Bank" required>

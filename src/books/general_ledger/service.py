@@ -12,6 +12,7 @@ thread; configurable account mapping is a thickening concern.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
@@ -31,6 +32,9 @@ AR = "AR"
 REVENUE = "Revenue"
 BANK = "Bank"
 FX_LOSS = "FX Loss"  # dedicated realized-FX P&L account (ADR-0005)
+WRITE_OFF = "Write-off"  # guided-journal write-off contra
+OWNERS_EQUITY = "Owner's Equity"  # year-end P&L sweep target
+_PNL_TYPES = ("income", "expense")
 
 
 def _period_of(d: date) -> str:
@@ -89,8 +93,17 @@ class PostingView:
 
 
 class LedgerService:
-    def __init__(self, db: Database, bus: EventBus) -> None:
+    def __init__(
+        self,
+        db: Database,
+        bus: EventBus,
+        year_end_blockers: Callable[[int], list] = lambda _year: [],
+    ) -> None:
         self._db = db
+        # Injected at the composition root (delegates to Reporting, the
+        # sanctioned cross-context reader) so the gate logic stays here in
+        # the Ledger without GL importing bank_reconciliation/reporting.
+        self._year_end_blockers = year_end_blockers
         bus.subscribe(InvoiceIssued, self._on_invoice_issued)
         bus.subscribe(PaymentRecorded, self._on_payment_recorded)
         bus.subscribe(SettlementAdjudicated, self._on_settlement_adjudicated)
@@ -107,6 +120,21 @@ class LedgerService:
         with self._db.unit_of_work() as session:
             session.add(_Account(code=code, name=name, type=type, control=control))
 
+    @staticmethod
+    def _period_locked(session, period: str) -> bool:
+        return (
+            session.execute(
+                select(_PeriodClose).where(_PeriodClose.period == period)
+            ).scalar_one_or_none()
+            is not None
+        )
+
+    @classmethod
+    def _lock_period(cls, session, period: str, kind: str) -> None:
+        """Idempotently record a period lock (ADR-0009)."""
+        if not cls._period_locked(session, period):
+            session.add(_PeriodClose(period=period, kind=kind))
+
     def soft_close(self, period: str) -> None:
         """Lock ``period`` (YYYY-MM) against new economic entries (ADR-0009).
 
@@ -114,11 +142,74 @@ class LedgerService:
         orthogonal axis and is deliberately not consulted here. Idempotent.
         """
         with self._db.unit_of_work() as session:
-            already = session.execute(
-                select(_PeriodClose).where(_PeriodClose.period == period)
-            ).scalar_one_or_none()
-            if already is None:
-                session.add(_PeriodClose(period=period, kind="soft"))
+            self._lock_period(session, period, kind="soft")
+
+    def write_off(self, posting_ref: int, on: date) -> None:
+        """Guided-journal write-off of a phantom bank posting (ADR-0006):
+        a fixed-shape Dr Write-off / Cr Bank reversal. Removes the posting
+        from the uncleared set so it no longer blocks the hard close."""
+        with self._db.unit_of_work() as session:
+            target = session.get(_Posting, posting_ref)
+            if target is None:
+                raise LookupError(f"no posting {posting_ref}")
+            amt = target.amount_minor
+            self._post(
+                session,
+                on=on,
+                narrative=f"Write-off of phantom bank posting #{posting_ref}",
+                source_kind="GuidedJournal",
+                source_id=f"writeoff:{posting_ref}",
+                legs=[
+                    (WRITE_OFF, amt, None, None),
+                    (BANK, -amt, None, None),
+                ],
+            )
+
+    def hard_close(self, year: int) -> None:
+        """Annual hard close (ADR-0009). Blocks while any uncleared bank
+        posting is unresolved (a stale exception); once clear, sweeps net
+        P&L into Owner's Equity via the guided-journal path and locks every
+        month of the year, after which the fiscal year is immutable."""
+        blockers = self._year_end_blockers(year)
+        if blockers:
+            raise ValueError(
+                f"hard close {year} blocked: {len(blockers)} unresolved "
+                "stale uncleared item(s) — classify or adjudicate first"
+            )
+        on = date(year, 12, 31)
+        with self._db.unit_of_work() as session:
+            balances = session.execute(
+                select(_Posting.account_code, _Account.type)
+                .join(_Account, _Account.code == _Posting.account_code)
+                .where(_Account.type.in_(_PNL_TYPES))
+            ).all()
+            pnl_codes = {code for code, _type in balances}
+            legs: list[tuple[str, int, int | None, str | None]] = []
+            net = 0
+            for code in sorted(pnl_codes):
+                bal = sum(
+                    session.execute(
+                        select(_Posting.amount_minor).where(
+                            _Posting.account_code == code
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if bal:
+                    legs.append((code, -bal, None, None))
+                    net += bal
+            legs.append((OWNERS_EQUITY, net, None, None))
+            self._post(
+                session,
+                on=on,
+                narrative=f"Year-end close {year}: net P&L to Owner's Equity",
+                source_kind="GuidedJournal",
+                source_id=f"hardclose:{year}",
+                legs=legs,
+            )
+            for month in range(1, 13):
+                self._lock_period(session, f"{year:04d}-{month:02d}", kind="hard")
 
     def _post(
         self,
@@ -131,12 +222,7 @@ class LedgerService:
         legs: list[tuple[str, int, int | None, str | None]],
     ) -> None:
         period = _period_of(on)
-        if (
-            session.execute(
-                select(_PeriodClose).where(_PeriodClose.period == period)
-            ).scalar_one_or_none()
-            is not None
-        ):
+        if self._period_locked(session, period):
             raise ValueError(f"period {period} is closed: cannot post on {on}")
         entry = _Entry(
             date=on,
@@ -255,3 +341,18 @@ class LedgerService:
                 )
                 for r in rows
             ]
+
+    def written_off_refs(self) -> set[int]:
+        """Bank-posting refs resolved by a guided-journal write-off."""
+        with self._db.unit_of_work() as session:
+            ids = (
+                session.execute(
+                    select(_Entry.source_id).where(
+                        _Entry.source_kind == "GuidedJournal",
+                        _Entry.source_id.like("writeoff:%"),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return {int(sid.split(":", 1)[1]) for sid in ids}

@@ -34,7 +34,13 @@ def create_app(db_url: str = "sqlite://", stale_after_days: int = 30) -> App:
     bus = EventBus()
 
     party = PartyService(db)
-    ledger = LedgerService(db, bus)  # subscribes its event handlers
+    # year_end_blockers late-binds to `reporting` (defined below): pure
+    # wiring, the gate logic lives in the Ledger / the read model.
+    ledger = LedgerService(
+        db,
+        bus,
+        year_end_blockers=lambda year: reporting.year_end_blockers(year),
+    )
     invoicing = InvoicingService(db, bus, party_name=lambda pid: party.get(pid).name)
     recon = BankReconciliationService(
         db, bank_postings=lambda account: ledger.postings_for(code=account)

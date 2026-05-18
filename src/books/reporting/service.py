@@ -9,11 +9,30 @@ tie-out (invariant 4) are both joins, never stored reads.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
+from datetime import date
 
 from books.bank_reconciliation.service import BankReconciliationService
 from books.general_ledger.service import LedgerService
 from books.platform.money import Money
+
+TIMING_DIFFERENCE = "timing_difference"
+STALE_EXCEPTION = "stale_exception"
+
+
+@dataclass(frozen=True, slots=True)
+class ReconcilingItem:
+    """An uncleared bank posting, classified for review (increment 1).
+
+    A timing difference is expected to clear soon; a stale exception is
+    overdue against the owner-configured threshold and needs attention.
+    """
+
+    ref: int
+    amount: Money
+    age_days: int
+    classification: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,8 +41,14 @@ class ReconciliationReport:
     ledger_bank_balance: Money
     confirmed_cash: Money
     difference: Money
-    reconciling_items: list[int]  # uncleared bank posting refs
+    reconciling_items: list[ReconcilingItem]  # uncleared bank postings
     unexplained_lines: list[int]  # statement line refs with no match
+
+
+def _period_end(period: str) -> date:
+    """Last calendar day of a ``YYYY-MM`` period."""
+    year, month = (int(part) for part in period.split("-"))
+    return date(year, month, calendar.monthrange(year, month)[1])
 
 
 class ReportingService:
@@ -31,9 +56,11 @@ class ReportingService:
         self,
         ledger: LedgerService,
         recon: BankReconciliationService,
+        stale_after_days: int = 30,
     ) -> None:
         self._ledger = ledger
         self._recon = recon
+        self._stale_after_days = stale_after_days
 
     def reconciliation_report(self, account: str, period: str) -> ReconciliationReport:
         ledger_balance = self._ledger.account_balance(code=account)
@@ -44,7 +71,21 @@ class ReportingService:
         confirmed_cash = Money.myr(
             sum(p.amount.minor_units for p in postings if p.ref in matched_postings)
         )
-        reconciling_items = [p.ref for p in postings if p.ref not in matched_postings]
+        period_end = _period_end(period)
+        reconciling_items = [
+            ReconcilingItem(
+                ref=p.ref,
+                amount=p.amount,
+                age_days=(age := (period_end - p.date).days),
+                classification=(
+                    STALE_EXCEPTION
+                    if age > self._stale_after_days
+                    else TIMING_DIFFERENCE
+                ),
+            )
+            for p in postings
+            if p.ref not in matched_postings
+        ]
 
         matched_lines = self._recon.matched_line_refs()
         unexplained_lines = [

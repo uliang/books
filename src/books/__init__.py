@@ -27,7 +27,7 @@ class App:
     reporting: ReportingService
 
 
-def create_app(db_url: str = "sqlite://") -> App:
+def create_app(db_url: str = "sqlite://", stale_after_days: int = 30) -> App:
     # Services are imported above, so their tables are registered on the
     # shared metadata before the database creates the schema.
     db = Database(db_url)
@@ -39,7 +39,9 @@ def create_app(db_url: str = "sqlite://") -> App:
     recon = BankReconciliationService(
         db, bank_postings=lambda account: ledger.postings_for(code=account)
     )
-    reporting = ReportingService(ledger=ledger, recon=recon)
+    reporting = ReportingService(
+        ledger=ledger, recon=recon, stale_after_days=stale_after_days
+    )
 
     return App(
         party=party,

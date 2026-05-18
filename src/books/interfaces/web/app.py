@@ -33,3 +33,7 @@ def create_web_app(books_app: App | None = None) -> Flask:
         return redirect(request.referrer or "/")
 
     return flask_app
+
+
+def main() -> None:
+    create_web_app().run(debug=True)

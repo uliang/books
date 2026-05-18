@@ -20,6 +20,7 @@ def test_web_tracer_thread_1_end_to_end():
             data={"code": code, "name": name, "type": type_, "control": ctrl},
         )
 
+    # party_id "1": fresh in-memory db, Acme registered above is always id 1
     c.post(
         "/invoicing/issue",
         data={

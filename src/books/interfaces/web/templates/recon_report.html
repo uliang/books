@@ -64,4 +64,12 @@
     {% else %}
         <p>No reconciling items</p>
     {% endif %}
+    <h2>Unexplained statement lines</h2>
+    {% if report.unexplained_lines %}
+        <ul>
+            {% for ref in report.unexplained_lines %}<li>line {{ ref }}</li>{% endfor %}
+        </ul>
+    {% else %}
+        <p>No unexplained lines</p>
+    {% endif %}
 {% endblock %}

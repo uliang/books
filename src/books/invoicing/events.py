@@ -25,5 +25,17 @@ class InvoiceIssued:
 class PaymentRecorded:
     invoice_number: int
     party_id: int
-    amount: Money
+    amount: Money  # MYR actually banked at settlement
     paid_on: date
+
+
+@dataclass(frozen=True)
+class SettlementAdjudicated:
+    """Owner ruled an ambiguous foreign settlement (ADR-0005). When the
+    invoice is settled in full, the MYR shortfall is a realized FX loss the
+    Ledger recognizes via its guided-journal template (ADR-0006)."""
+
+    invoice_number: int
+    party_id: int
+    fx_loss: Money  # MYR; positive = realized loss
+    on: date

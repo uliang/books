@@ -18,7 +18,11 @@ from datetime import date
 from sqlalchemy import Date, ForeignKey, Integer, String, select
 from sqlalchemy.orm import Mapped, mapped_column
 
-from books.invoicing.events import InvoiceIssued, PaymentRecorded
+from books.invoicing.events import (
+    InvoiceIssued,
+    PaymentRecorded,
+    SettlementAdjudicated,
+)
 from books.platform.db import Base, Database
 from books.platform.events import EventBus
 from books.platform.money import Money
@@ -26,6 +30,7 @@ from books.platform.money import Money
 AR = "AR"
 REVENUE = "Revenue"
 BANK = "Bank"
+FX_LOSS = "FX Loss"  # dedicated realized-FX P&L account (ADR-0005)
 
 
 def _period_of(d: date) -> str:
@@ -88,6 +93,7 @@ class LedgerService:
         self._db = db
         bus.subscribe(InvoiceIssued, self._on_invoice_issued)
         bus.subscribe(PaymentRecorded, self._on_payment_recorded)
+        bus.subscribe(SettlementAdjudicated, self._on_settlement_adjudicated)
 
     # --- write side -----------------------------------------------------
 
@@ -167,15 +173,20 @@ class LedgerService:
                 ],
             )
 
+    def _ar_party_name(self, session, party_id: int) -> str | None:
+        """The display name already cached on this party's AR postings
+        (CONTEXT: Party is referenced by id + cached name)."""
+        return session.execute(
+            select(_Posting.party_name)
+            .where(_Posting.account_code == AR)
+            .where(_Posting.party_id == party_id)
+            .limit(1)
+        ).scalar_one_or_none()
+
     def _on_payment_recorded(self, e: PaymentRecorded) -> None:
         amt = e.amount.minor_units
         with self._db.unit_of_work() as session:
-            party_name = session.execute(
-                select(_Posting.party_name)
-                .where(_Posting.account_code == AR)
-                .where(_Posting.party_id == e.party_id)
-                .limit(1)
-            ).scalar_one_or_none()
+            party_name = self._ar_party_name(session, e.party_id)
             self._post(
                 session,
                 on=e.paid_on,
@@ -185,6 +196,28 @@ class LedgerService:
                 legs=[
                     (BANK, amt, None, None),
                     (AR, -amt, e.party_id, party_name),
+                ],
+            )
+
+    def _on_settlement_adjudicated(self, e: SettlementAdjudicated) -> None:
+        # The one guarded guided-journal template for realized FX (ADR-0006):
+        # a fixed-shape Dr FX Loss / Cr AR entry, not free-hand journaling.
+        loss = e.fx_loss.minor_units
+        if loss == 0:
+            return
+        with self._db.unit_of_work() as session:
+            party_name = self._ar_party_name(session, e.party_id)
+            self._post(
+                session,
+                on=e.on,
+                narrative=(
+                    f"Realized FX loss on settlement of invoice #{e.invoice_number}"
+                ),
+                source_kind="GuidedJournal",
+                source_id=str(e.invoice_number),
+                legs=[
+                    (FX_LOSS, loss, None, None),
+                    (AR, -loss, e.party_id, party_name),
                 ],
             )
 

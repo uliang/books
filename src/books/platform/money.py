@@ -29,6 +29,10 @@ class Money:
     def myr(cls, minor_units: int) -> Money:
         return cls(minor_units, Currency.MYR)
 
+    @classmethod
+    def sgd(cls, minor_units: int) -> Money:
+        return cls(minor_units, Currency.SGD)
+
     def _same_currency(self, other: Money) -> None:
         if self.currency is not other.currency:
             raise ValueError(

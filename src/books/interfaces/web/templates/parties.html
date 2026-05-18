@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block body %}
+    <h1>Register party</h1>
+    <form method="post" action="{{ url_for('setup.register_party') }}">
+        <label>
+            Name
+            <input name="name" required>
+        </label>
+        <label>
+            Role
+            <select name="role">
+                <option value="customer">customer</option>
+                <option value="supplier">supplier</option>
+            </select>
+        </label>
+        <button type="submit">Register</button>
+    </form>
+{% endblock %}

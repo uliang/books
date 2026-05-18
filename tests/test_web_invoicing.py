@@ -69,3 +69,15 @@ def test_mark_paid_shortfall_then_adjudicate_still_owes_keeps_ar_open():
     assert resp.status_code == 200
     assert books.ledger.account_balance(code="AR").minor_units == 20_00
     assert books.ledger.account_balance(code="FX Loss").minor_units == 0
+
+
+def test_unknown_invoice_mark_paid_flashes_not_500():
+    books, c = _app_client()
+    _setup(books)
+    resp = c.post(
+        "/invoicing/999/mark-paid",
+        data={"paid_on": "2026-01-20"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "no invoice 999" in resp.get_data(as_text=True)

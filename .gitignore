@@ -54,5 +54,8 @@ coverage.xml
 .DS_Store
 Thumbs.db
 
-# Node modules 
+# Node modules
 node_modules/
+
+# Dev database (written by `uv run books-web`)
+books.db

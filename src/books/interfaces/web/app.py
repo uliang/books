@@ -26,6 +26,8 @@ def create_web_app(books_app: App | None = None) -> Flask:
 
     register(flask_app)
 
+    # NB: werkzeug BadRequestKeyError subclasses LookupError, so a missing
+    # form field is also surfaced as a flash (acceptable for this tracer).
     @flask_app.errorhandler(ValueError)
     @flask_app.errorhandler(LookupError)
     def _domain_error(exc: Exception) -> Response:

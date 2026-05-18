@@ -98,7 +98,7 @@ source_modules = [
 forbidden_modules = ["books.reporting"]
 
 # interfaces/ is the outermost adapter leaf: nothing in the domain may
-# depend on it (design: web-interface-tracer-slice; ADR-0013 discipline).
+# depend on it (ADR-0013 discipline; web-interface tracer slice).
 [[tool.importlinter.contracts]]
 name = "interfaces is an outermost leaf (nothing depends on it)"
 type = "forbidden"
@@ -114,8 +114,8 @@ forbidden_modules = ["books.interfaces"]
 
 # interfaces/ may use the composition root + service APIs, but must never
 # reach into a context's private persistence/aggregate modules. Each such
-# private module is named here as a forbidden target (incremental
-# whitelist discipline, same as the cross-context seam list above).
+# private module is added here as a forbidden target as the interface grows
+# (explicit-deny discipline, analogous to the seam whitelist above).
 [[tool.importlinter.contracts]]
 name = "interfaces touches only the service seam (no platform plumbing)"
 type = "forbidden"

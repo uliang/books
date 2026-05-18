@@ -13,6 +13,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+_ROOT = Path(__file__).parents[1]
+
 
 def test_context_boundary_contracts_hold() -> None:
     result = subprocess.run(
@@ -27,7 +29,7 @@ def test_context_boundary_contracts_hold() -> None:
 
 
 def test_interfaces_boundary_contracts_declared() -> None:
-    cfg = tomllib.loads(Path("pyproject.toml").read_text())
+    cfg = tomllib.loads((_ROOT / "pyproject.toml").read_text())
     names = {c["name"] for c in cfg["tool"]["importlinter"]["contracts"]}
     assert "interfaces is an outermost leaf (nothing depends on it)" in names
     assert any(n.startswith("interfaces touches only the service seam") for n in names)

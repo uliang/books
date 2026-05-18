@@ -1,12 +1,16 @@
-<!doctype html>
+<!DOCTYPE html>
 <title>books</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
-<header><a href="/">books</a></header>
+<header>
+    <a href="{{ url_for('setup.landing') }}">books</a>
+</header>
 {% with messages = get_flashed_messages() %}
-  {% if messages %}
-    <ul class="flash">
-      {% for m in messages %}<li>{{ m }}</li>{% endfor %}
-    </ul>
-  {% endif %}
+    {% if messages %}
+        <ul class="flash">
+            {% for m in messages %}<li>{{ m }}</li>{% endfor %}
+        </ul>
+    {% endif %}
 {% endwith %}
-<main>{% block body %}{% endblock %}</main>
+<main>
+    {% block body %}{% endblock %}
+</main>

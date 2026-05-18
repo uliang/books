@@ -8,7 +8,7 @@ stay in the domain (service-raised ValueError/LookupError -> flash).
 
 from __future__ import annotations
 
-from flask import Flask, current_app, flash, redirect, request
+from flask import Flask, Response, current_app, flash, redirect, request
 
 from books import App, create_app
 
@@ -28,7 +28,7 @@ def create_web_app(books_app: App | None = None) -> Flask:
 
     @flask_app.errorhandler(ValueError)
     @flask_app.errorhandler(LookupError)
-    def _domain_error(exc: Exception):
+    def _domain_error(exc: Exception) -> Response:
         flash(str(exc))
         return redirect(request.referrer or "/")
 

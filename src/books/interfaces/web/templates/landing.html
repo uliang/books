@@ -1,16 +1,20 @@
 {% extends "base.html" %}
 {% block body %}
-  <h1>books</h1>
-  <h2>Parties</h2>
-  {% if parties %}
-    <ul>{% for p in parties %}<li>{{ p.name }}</li>{% endfor %}</ul>
-  {% else %}
-    <p>No parties yet</p>
-  {% endif %}
-  <h2>Accounts</h2>
-  {% if accounts %}
-    <ul>{% for a in accounts %}<li>{{ a.code }} — {{ a.name }}</li>{% endfor %}</ul>
-  {% else %}
-    <p>No accounts yet</p>
-  {% endif %}
+    <h1>books</h1>
+    <h2>Parties</h2>
+    {% if parties %}
+        <ul>
+            {% for p in parties %}<li>{{ p.name }}</li>{% endfor %}
+        </ul>
+    {% else %}
+        <p>No parties yet</p>
+    {% endif %}
+    <h2>Accounts</h2>
+    {% if accounts %}
+        <ul>
+            {% for a in accounts %}<li>{{ a.code }} — {{ a.name }}</li>{% endfor %}
+        </ul>
+    {% else %}
+        <p>No accounts yet</p>
+    {% endif %}
 {% endblock %}

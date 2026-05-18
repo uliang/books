@@ -1,3 +1,5 @@
+"""Flask web interface — landing page skeleton (Task 1)."""
+
 from books import create_app
 from books.interfaces.web.app import create_web_app
 

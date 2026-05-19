@@ -6,8 +6,11 @@ and translates them into balanced journal entries, each tagged with its
 provenance (ADR-0012). Posting amounts are signed minor units, debit
 positive; an account balance is their sum.
 
-Well-known account codes (AR / Revenue / Bank) are hardwired for the tracer
-thread; configurable account mapping is a thickening concern.
+Well-known posting roles (ar / revenue / bank / fx_loss / write_off /
+owners_equity / due_to_owner) map to concrete account codes via a persisted
+``gl_account_role`` table, seeded with sensible defaults and editable by the
+owner through ``assign_role``. The Chart of Accounts is a GL aggregate
+(CONTEXT) so the role mapping lives here, not at the composition root.
 """
 
 from __future__ import annotations
@@ -33,13 +36,19 @@ from books.platform.db import Base, Database
 from books.platform.events import EventBus
 from books.platform.money import Money
 
-AR = "AR"
-REVENUE = "Revenue"
-BANK = "Bank"
-FX_LOSS = "FX Loss"  # dedicated realized-FX P&L account (ADR-0005)
-WRITE_OFF = "Write-off"  # guided-journal write-off contra
-OWNERS_EQUITY = "Owner's Equity"  # year-end P&L sweep target
-DUE_TO_OWNER = "Due to Owner"  # the only payable (ADR-0003, amended)
+# Default role → code mapping. The Chart of Accounts is an aggregate inside
+# General Ledger (CONTEXT); the codes the handlers post to are a *persisted*
+# role mapping the owner can override (see ``assign_role``). Defaults match
+# the well-known names so first-run flows just work.
+_DEFAULT_ROLES: dict[str, str] = {
+    "ar": "AR",
+    "revenue": "Revenue",
+    "bank": "Bank",
+    "fx_loss": "FX Loss",  # ADR-0005 dedicated realized-FX P&L account
+    "write_off": "Write-off",  # guided-journal write-off contra
+    "owners_equity": "Owner's Equity",  # year-end P&L sweep target
+    "due_to_owner": "Due to Owner",  # the only payable (ADR-0003, amended)
+}
 _PNL_TYPES = ("income", "expense")
 
 
@@ -75,6 +84,18 @@ class _PeriodClose(Base):
 
     period: Mapped[str] = mapped_column(String, primary_key=True)  # YYYY-MM
     kind: Mapped[str] = mapped_column(String)  # "soft"
+
+
+class _AccountRole(Base):
+    """Persisted role→code mapping (Chart of Accounts is a GL aggregate per
+    CONTEXT). Defaults are seeded idempotently on LedgerService init so the
+    well-known flows work out of the box; the owner reassigns via
+    ``assign_role`` to use their own chart at any time."""
+
+    __tablename__ = "gl_account_role"
+
+    role: Mapped[str] = mapped_column(String, primary_key=True)
+    code: Mapped[str] = mapped_column(String)
 
 
 class _Posting(Base):
@@ -116,6 +137,25 @@ class LedgerService:
         bus.subscribe(OwnerPaidExpenseRecorded, self._on_owner_paid_expense)
         bus.subscribe(OwnerReimbursed, self._on_owner_reimbursed)
         bus.subscribe(ContractorPaid, self._on_contractor_paid)
+        self._seed_default_roles()
+
+    def _seed_default_roles(self) -> None:
+        """Idempotent first-run seed of the role→code defaults."""
+        with self._db.unit_of_work() as session:
+            existing = set(session.execute(select(_AccountRole.role)).scalars().all())
+            for role, code in _DEFAULT_ROLES.items():
+                if role not in existing:
+                    session.add(_AccountRole(role=role, code=code))
+
+    @staticmethod
+    def _role(session, role: str) -> str:
+        """Resolve a role to its current code inside an open session."""
+        code = session.execute(
+            select(_AccountRole.code).where(_AccountRole.role == role)
+        ).scalar_one_or_none()
+        if code is None:
+            raise ValueError(f"unknown role {role!r}")
+        return code
 
     # --- write side -----------------------------------------------------
 
@@ -144,6 +184,21 @@ class LedgerService:
         if not cls._period_locked(session, period):
             session.add(_PeriodClose(period=period, kind=kind))
 
+    def assign_role(self, role: str, code: str) -> None:
+        """Override the code a well-known posting role maps to. The code
+        need not exist on the Chart yet, but a posting referencing a missing
+        code will fail at post time via the existing _Posting → _Account FK."""
+        if role not in _DEFAULT_ROLES:
+            raise ValueError(f"unknown role {role!r}; known: {sorted(_DEFAULT_ROLES)}")
+        with self._db.unit_of_work() as session:
+            row = session.execute(
+                select(_AccountRole).where(_AccountRole.role == role)
+            ).scalar_one_or_none()
+            if row is None:
+                session.add(_AccountRole(role=role, code=code))
+            else:
+                row.code = code
+
     def soft_close(self, period: str) -> None:
         """Lock ``period`` (YYYY-MM) against new economic entries (ADR-0009).
 
@@ -162,6 +217,8 @@ class LedgerService:
             if target is None:
                 raise LookupError(f"no posting {posting_ref}")
             amt = target.amount_minor
+            write_off = self._role(session, "write_off")
+            bank = self._role(session, "bank")
             self._post(
                 session,
                 on=on,
@@ -169,8 +226,8 @@ class LedgerService:
                 source_kind="GuidedJournal",
                 source_id=f"writeoff:{posting_ref}",
                 legs=[
-                    (WRITE_OFF, amt, None, None),
-                    (BANK, -amt, None, None),
+                    (write_off, amt, None, None),
+                    (bank, -amt, None, None),
                 ],
             )
 
@@ -208,7 +265,7 @@ class LedgerService:
                 if bal:
                     legs.append((code, -bal, None, None))
                     net += bal
-            legs.append((OWNERS_EQUITY, net, None, None))
+            legs.append((self._role(session, "owners_equity"), net, None, None))
             self._post(
                 session,
                 on=on,
@@ -256,6 +313,8 @@ class LedgerService:
     def _on_invoice_issued(self, e: InvoiceIssued) -> None:
         amt = e.amount.minor_units
         with self._db.unit_of_work() as session:
+            ar = self._role(session, "ar")
+            revenue = self._role(session, "revenue")
             self._post(
                 session,
                 on=e.issued_on,
@@ -263,17 +322,18 @@ class LedgerService:
                 source_kind="InvoiceIssued",
                 source_id=str(e.invoice_number),
                 legs=[
-                    (AR, amt, e.party_id, e.party_name),
-                    (REVENUE, -amt, None, None),
+                    (ar, amt, e.party_id, e.party_name),
+                    (revenue, -amt, None, None),
                 ],
             )
 
     def _ar_party_name(self, session, party_id: int) -> str | None:
         """The display name already cached on this party's AR postings
         (CONTEXT: Party is referenced by id + cached name)."""
+        ar = self._role(session, "ar")
         return session.execute(
             select(_Posting.party_name)
-            .where(_Posting.account_code == AR)
+            .where(_Posting.account_code == ar)
             .where(_Posting.party_id == party_id)
             .limit(1)
         ).scalar_one_or_none()
@@ -282,6 +342,8 @@ class LedgerService:
         amt = e.amount.minor_units
         with self._db.unit_of_work() as session:
             party_name = self._ar_party_name(session, e.party_id)
+            bank = self._role(session, "bank")
+            ar = self._role(session, "ar")
             self._post(
                 session,
                 on=e.paid_on,
@@ -289,8 +351,8 @@ class LedgerService:
                 source_kind="PaymentRecorded",
                 source_id=str(e.invoice_number),
                 legs=[
-                    (BANK, amt, None, None),
-                    (AR, -amt, e.party_id, party_name),
+                    (bank, amt, None, None),
+                    (ar, -amt, e.party_id, party_name),
                 ],
             )
 
@@ -302,6 +364,8 @@ class LedgerService:
             return
         with self._db.unit_of_work() as session:
             party_name = self._ar_party_name(session, e.party_id)
+            fx_loss = self._role(session, "fx_loss")
+            ar = self._role(session, "ar")
             self._post(
                 session,
                 on=e.on,
@@ -311,8 +375,8 @@ class LedgerService:
                 source_kind="GuidedJournal",
                 source_id=str(e.invoice_number),
                 legs=[
-                    (FX_LOSS, loss, None, None),
-                    (AR, -loss, e.party_id, party_name),
+                    (fx_loss, loss, None, None),
+                    (ar, -loss, e.party_id, party_name),
                 ],
             )
 
@@ -321,6 +385,7 @@ class LedgerService:
         # amended). Supplier Party rides the expense leg as the dimension.
         amt = e.amount.minor_units
         with self._db.unit_of_work() as session:
+            due = self._role(session, "due_to_owner")
             self._post(
                 session,
                 on=e.on,
@@ -329,7 +394,7 @@ class LedgerService:
                 source_id=str(e.party_id),
                 legs=[
                     (e.category_account, amt, e.party_id, e.party_name),
-                    (DUE_TO_OWNER, -amt, None, None),
+                    (due, -amt, None, None),
                 ],
             )
 
@@ -338,6 +403,7 @@ class LedgerService:
         # Contractor Party rides the expense leg as the dimension.
         amt = e.amount.minor_units
         with self._db.unit_of_work() as session:
+            bank = self._role(session, "bank")
             self._post(
                 session,
                 on=e.on,
@@ -346,13 +412,15 @@ class LedgerService:
                 source_id=str(e.party_id),
                 legs=[
                     (e.category_account, amt, e.party_id, e.party_name),
-                    (BANK, -amt, None, None),
+                    (bank, -amt, None, None),
                 ],
             )
 
     def _on_owner_reimbursed(self, e: OwnerReimbursed) -> None:
         amt = e.amount.minor_units
         with self._db.unit_of_work() as session:
+            due = self._role(session, "due_to_owner")
+            bank = self._role(session, "bank")
             self._post(
                 session,
                 on=e.on,
@@ -360,12 +428,17 @@ class LedgerService:
                 source_kind="OwnerReimbursed",
                 source_id=e.on.isoformat(),
                 legs=[
-                    (DUE_TO_OWNER, amt, None, None),
-                    (BANK, -amt, None, None),
+                    (due, amt, None, None),
+                    (bank, -amt, None, None),
                 ],
             )
 
     # --- query side (a context query API, ADR-0013) ---------------------
+
+    def role_code(self, role: str) -> str:
+        """The code currently mapped to a well-known posting role."""
+        with self._db.unit_of_work() as session:
+            return self._role(session, role)
 
     def account_balance(self, code: str) -> Money:
         with self._db.unit_of_work() as session:

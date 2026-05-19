@@ -113,7 +113,7 @@ class ReportingService:
         matched = self._recon.matched_posting_refs()
         written_off = self._ledger.written_off_refs()
         blockers: list[ReconcilingItem] = []
-        for p in self._ledger.postings_for(code="Bank"):
+        for p in self._ledger.postings_for(code=self._ledger.role_code("bank")):
             if p.ref in matched or p.ref in written_off:
                 continue
             age = (year_end - p.date).days

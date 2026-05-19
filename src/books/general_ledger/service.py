@@ -16,7 +16,7 @@ owner through ``assign_role``. The Chart of Accounts is a GL aggregate
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from sqlalchemy import Date, ForeignKey, Integer, String, select
@@ -54,6 +54,13 @@ _PNL_TYPES = ("income", "expense")
 
 def _period_of(d: date) -> str:
     return f"{d.year:04d}-{d.month:02d}"
+
+
+def _party_dim(party_id: int, party_name: str | None) -> dict[str, tuple[str, str]]:
+    """Carry a Party as the ADR-0007 dimension on a journal leg (v1's only
+    dimension type). Name defaults to the empty string so the schema's
+    cached-name invariant holds even if a resolver returned ``None``."""
+    return {"party": (str(party_id), party_name or "")}
 
 
 class _Account(Base):
@@ -106,8 +113,28 @@ class _Posting(Base):
     account_code: Mapped[str] = mapped_column(ForeignKey("gl_account.code"))
     amount_minor: Mapped[int] = mapped_column(Integer)  # signed, Dr positive
     date: Mapped[date] = mapped_column(Date)
-    party_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    party_name: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class _PostingDimension(Base):
+    """Generic per-line analytical dimension (ADR-0007). Typed by ``type``
+    (only ``"party"`` in v1; Project later is data, not schema). The
+    fixed-column alternative was rejected — see the ADR."""
+
+    __tablename__ = "gl_posting_dimension"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    posting_id: Mapped[int] = mapped_column(ForeignKey("gl_posting.id"))
+    type: Mapped[str] = mapped_column(String)
+    value_id: Mapped[str] = mapped_column(String)
+    value_name: Mapped[str] = mapped_column(String)
+
+
+@dataclass(frozen=True, slots=True)
+class DimensionValue:
+    """A typed analytical tag's value on a posting (ADR-0007)."""
+
+    id: str
+    name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +143,11 @@ class PostingView:
     account_code: str
     amount: Money
     date: date
-    party_name: str | None
+    dimensions: dict[str, DimensionValue] = field(default_factory=dict)
+    # Derived backward-compat convenience: the Party dimension's name (Party
+    # is the only v1 dimension type). Prefer ``dimensions["party"]`` in new
+    # code so adding Project later doesn't grow the view's shape.
+    party_name: str | None = None
 
 
 class LedgerService:
@@ -226,8 +257,8 @@ class LedgerService:
                 source_kind="GuidedJournal",
                 source_id=f"writeoff:{posting_ref}",
                 legs=[
-                    (write_off, amt, None, None),
-                    (bank, -amt, None, None),
+                    (write_off, amt, None),
+                    (bank, -amt, None),
                 ],
             )
 
@@ -250,7 +281,7 @@ class LedgerService:
                 .where(_Account.type.in_(_PNL_TYPES))
             ).all()
             pnl_codes = {code for code, _type in balances}
-            legs: list[tuple[str, int, int | None, str | None]] = []
+            legs: list[tuple[str, int, dict[str, tuple[str, str]] | None]] = []
             net = 0
             for code in sorted(pnl_codes):
                 bal = sum(
@@ -263,9 +294,9 @@ class LedgerService:
                     .all()
                 )
                 if bal:
-                    legs.append((code, -bal, None, None))
+                    legs.append((code, -bal, None))
                     net += bal
-            legs.append((self._role(session, "owners_equity"), net, None, None))
+            legs.append((self._role(session, "owners_equity"), net, None))
             self._post(
                 session,
                 on=on,
@@ -285,8 +316,12 @@ class LedgerService:
         narrative: str,
         source_kind: str,
         source_id: str,
-        legs: list[tuple[str, int, int | None, str | None]],
+        legs: list[tuple[str, int, dict[str, tuple[str, str]] | None]],
     ) -> None:
+        """Insert a balanced entry. Each leg is
+        ``(account_code, amount_minor, dimensions)`` where ``dimensions`` is
+        a mapping of ADR-0007 dimension types to ``(value_id, value_name)``
+        (or ``None`` for an undimensioned leg)."""
         period = _period_of(on)
         if self._period_locked(session, period):
             raise ValueError(f"period {period} is closed: cannot post on {on}")
@@ -298,17 +333,25 @@ class LedgerService:
         )
         session.add(entry)
         session.flush()
-        for account_code, amount_minor, party_id, party_name in legs:
-            session.add(
-                _Posting(
-                    entry_id=entry.id,
-                    account_code=account_code,
-                    amount_minor=amount_minor,
-                    date=on,
-                    party_id=party_id,
-                    party_name=party_name,
-                )
+        for account_code, amount_minor, dimensions in legs:
+            posting = _Posting(
+                entry_id=entry.id,
+                account_code=account_code,
+                amount_minor=amount_minor,
+                date=on,
             )
+            session.add(posting)
+            if dimensions:
+                session.flush()
+                for dim_type, (value_id, value_name) in dimensions.items():
+                    session.add(
+                        _PostingDimension(
+                            posting_id=posting.id,
+                            type=dim_type,
+                            value_id=str(value_id),
+                            value_name=value_name,
+                        )
+                    )
 
     def _on_invoice_issued(self, e: InvoiceIssued) -> None:
         amt = e.amount.minor_units
@@ -322,8 +365,8 @@ class LedgerService:
                 source_kind="InvoiceIssued",
                 source_id=str(e.invoice_number),
                 legs=[
-                    (ar, amt, e.party_id, e.party_name),
-                    (revenue, -amt, None, None),
+                    (ar, amt, _party_dim(e.party_id, e.party_name)),
+                    (revenue, -amt, None),
                 ],
             )
 
@@ -332,9 +375,11 @@ class LedgerService:
         (CONTEXT: Party is referenced by id + cached name)."""
         ar = self._role(session, "ar")
         return session.execute(
-            select(_Posting.party_name)
+            select(_PostingDimension.value_name)
+            .join(_Posting, _Posting.id == _PostingDimension.posting_id)
             .where(_Posting.account_code == ar)
-            .where(_Posting.party_id == party_id)
+            .where(_PostingDimension.type == "party")
+            .where(_PostingDimension.value_id == str(party_id))
             .limit(1)
         ).scalar_one_or_none()
 
@@ -351,8 +396,8 @@ class LedgerService:
                 source_kind="PaymentRecorded",
                 source_id=str(e.invoice_number),
                 legs=[
-                    (bank, amt, None, None),
-                    (ar, -amt, e.party_id, party_name),
+                    (bank, amt, None),
+                    (ar, -amt, _party_dim(e.party_id, party_name)),
                 ],
             )
 
@@ -375,8 +420,8 @@ class LedgerService:
                 source_kind="GuidedJournal",
                 source_id=str(e.invoice_number),
                 legs=[
-                    (fx_loss, loss, None, None),
-                    (ar, -loss, e.party_id, party_name),
+                    (fx_loss, loss, None),
+                    (ar, -loss, _party_dim(e.party_id, party_name)),
                 ],
             )
 
@@ -393,8 +438,8 @@ class LedgerService:
                 source_kind="OwnerPaidExpenseRecorded",
                 source_id=str(e.party_id),
                 legs=[
-                    (e.category_account, amt, e.party_id, e.party_name),
-                    (due, -amt, None, None),
+                    (e.category_account, amt, _party_dim(e.party_id, e.party_name)),
+                    (due, -amt, None),
                 ],
             )
 
@@ -411,8 +456,8 @@ class LedgerService:
                 source_kind="ContractorPaid",
                 source_id=str(e.party_id),
                 legs=[
-                    (e.category_account, amt, e.party_id, e.party_name),
-                    (bank, -amt, None, None),
+                    (e.category_account, amt, _party_dim(e.party_id, e.party_name)),
+                    (bank, -amt, None),
                 ],
             )
 
@@ -428,8 +473,8 @@ class LedgerService:
                 source_kind="OwnerReimbursed",
                 source_id=e.on.isoformat(),
                 legs=[
-                    (due, amt, None, None),
-                    (bank, -amt, None, None),
+                    (due, amt, None),
+                    (bank, -amt, None),
                 ],
             )
 
@@ -462,13 +507,37 @@ class LedgerService:
                 .scalars()
                 .all()
             )
+            ids = [r.id for r in rows]
+            dim_rows = (
+                (
+                    session.execute(
+                        select(_PostingDimension).where(
+                            _PostingDimension.posting_id.in_(ids)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if ids
+                else []
+            )
+            by_posting: dict[int, dict[str, DimensionValue]] = {i: {} for i in ids}
+            for d in dim_rows:
+                by_posting[d.posting_id][d.type] = DimensionValue(
+                    id=d.value_id, name=d.value_name
+                )
             return [
                 PostingView(
                     ref=r.id,
                     account_code=r.account_code,
                     amount=Money.myr(r.amount_minor),
                     date=r.date,
-                    party_name=r.party_name,
+                    dimensions=by_posting[r.id],
+                    party_name=(
+                        by_posting[r.id]["party"].name
+                        if "party" in by_posting[r.id]
+                        else None
+                    ),
                 )
                 for r in rows
             ]

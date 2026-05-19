@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from books.bank_reconciliation.service import BankReconciliationService
+from books.expense_management.service import ExpenseManagementService
 from books.general_ledger.service import LedgerService
 from books.invoicing.service import InvoicingService
 from books.party.service import PartyService
@@ -23,6 +24,7 @@ class App:
     party: PartyService
     ledger: LedgerService
     invoicing: InvoicingService
+    expense: ExpenseManagementService
     bank_reconciliation: BankReconciliationService
     reporting: ReportingService
 
@@ -42,6 +44,9 @@ def create_app(db_url: str = "sqlite://", stale_after_days: int = 30) -> App:
         year_end_blockers=lambda year: reporting.year_end_blockers(year),
     )
     invoicing = InvoicingService(db, bus, party_name=lambda pid: party.get(pid).name)
+    expense = ExpenseManagementService(
+        db, bus, party_name=lambda pid: party.get(pid).name
+    )
     recon = BankReconciliationService(
         db, bank_postings=lambda account: ledger.postings_for(code=account)
     )
@@ -53,6 +58,7 @@ def create_app(db_url: str = "sqlite://", stale_after_days: int = 30) -> App:
         party=party,
         ledger=ledger,
         invoicing=invoicing,
+        expense=expense,
         bank_reconciliation=recon,
         reporting=reporting,
     )

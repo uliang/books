@@ -19,6 +19,10 @@ from datetime import date
 from sqlalchemy import Date, ForeignKey, Integer, String, select
 from sqlalchemy.orm import Mapped, mapped_column
 
+from books.expense_management.events import (
+    CardChargeCaptured,
+    CardStatementSettled,
+)
 from books.invoicing.events import (
     InvoiceIssued,
     PaymentRecorded,
@@ -34,6 +38,7 @@ BANK = "Bank"
 FX_LOSS = "FX Loss"  # dedicated realized-FX P&L account (ADR-0005)
 WRITE_OFF = "Write-off"  # guided-journal write-off contra
 OWNERS_EQUITY = "Owner's Equity"  # year-end P&L sweep target
+CARD_CLEARING = "Card Clearing"  # the only payable (ADR-0003)
 _PNL_TYPES = ("income", "expense")
 
 
@@ -107,6 +112,8 @@ class LedgerService:
         bus.subscribe(InvoiceIssued, self._on_invoice_issued)
         bus.subscribe(PaymentRecorded, self._on_payment_recorded)
         bus.subscribe(SettlementAdjudicated, self._on_settlement_adjudicated)
+        bus.subscribe(CardChargeCaptured, self._on_card_charge_captured)
+        bus.subscribe(CardStatementSettled, self._on_card_statement_settled)
 
     # --- write side -----------------------------------------------------
 
@@ -304,6 +311,36 @@ class LedgerService:
                 legs=[
                     (FX_LOSS, loss, None, None),
                     (AR, -loss, e.party_id, party_name),
+                ],
+            )
+
+    def _on_card_charge_captured(self, e: CardChargeCaptured) -> None:
+        amt = e.amount.minor_units
+        with self._db.unit_of_work() as session:
+            self._post(
+                session,
+                on=e.on,
+                narrative=f"Card charge: {e.party_name}",
+                source_kind="CardChargeCaptured",
+                source_id=str(e.party_id),
+                legs=[
+                    (e.category_account, amt, e.party_id, e.party_name),
+                    (CARD_CLEARING, -amt, None, None),
+                ],
+            )
+
+    def _on_card_statement_settled(self, e: CardStatementSettled) -> None:
+        amt = e.amount.minor_units
+        with self._db.unit_of_work() as session:
+            self._post(
+                session,
+                on=e.on,
+                narrative="Card statement settlement",
+                source_kind="CardStatementSettled",
+                source_id=e.on.isoformat(),
+                legs=[
+                    (CARD_CLEARING, amt, None, None),
+                    (BANK, -amt, None, None),
                 ],
             )
 

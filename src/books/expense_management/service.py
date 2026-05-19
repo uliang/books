@@ -1,10 +1,12 @@
 """Expense Management application API (ADR-0013).
 
-Buy-side outflow capture on the card rail. It references a Party by id and
-caches the display name onto the event (CONTEXT) via an injected resolver —
-no shared kernel, no cross-context import. It publishes events; the Ledger
-consumes them and produces postings (ADR-0006). Purchases are cash basis;
-the one accrual is the card clearing account, settled monthly (ADR-0003).
+Buy-side outflow capture. The owner pays business expenses personally; the
+business owes the owner (ADR-0003, amended — the single accrued payable is
+Due to Owner, not a card-clearing account; the card is personal and off the
+business books). It references a Party by id and caches the display name
+onto the event (CONTEXT) via an injected resolver — no shared kernel, no
+cross-context import. It publishes events; the Ledger consumes them and
+produces postings (ADR-0006). A supplier Party is mandatory provenance.
 """
 
 from __future__ import annotations
@@ -16,16 +18,16 @@ from sqlalchemy import Date, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from books.expense_management.events import (
-    CardChargeCaptured,
-    CardStatementSettled,
+    OwnerPaidExpenseRecorded,
+    OwnerReimbursed,
 )
 from books.platform.db import Base, Database
 from books.platform.events import EventBus
 from books.platform.money import Money
 
 
-class _CardCharge(Base):
-    __tablename__ = "expense_card_charge"
+class _OwnerPaidExpense(Base):
+    __tablename__ = "owner_paid_expense"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     party_id: Mapped[int] = mapped_column(Integer)
@@ -35,8 +37,8 @@ class _CardCharge(Base):
     on: Mapped[date] = mapped_column(Date)
 
 
-class _CardSettlement(Base):
-    __tablename__ = "expense_card_settlement"
+class _OwnerReimbursement(Base):
+    __tablename__ = "owner_reimbursement"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     amount_minor: Mapped[int] = mapped_column(Integer)
@@ -54,17 +56,19 @@ class ExpenseManagementService:
         self._bus = bus
         self._party_name = party_name
 
-    def capture_card_charge(
+    def record_owner_paid_expense(
         self,
         party_id: int,
         amount: Money,
         category_account: str,
         on: date,
     ) -> None:
+        """A business expense the owner paid personally — recognized now
+        against Due to Owner. ``party_id`` (the supplier) is required."""
         with self._db.unit_of_work() as session:
             name = self._party_name(party_id)
             session.add(
-                _CardCharge(
+                _OwnerPaidExpense(
                     party_id=party_id,
                     party_name=name,
                     amount_minor=amount.minor_units,
@@ -73,7 +77,7 @@ class ExpenseManagementService:
                 )
             )
             self._bus.publish(
-                CardChargeCaptured(
+                OwnerPaidExpenseRecorded(
                     party_id=party_id,
                     party_name=name,
                     amount=amount,
@@ -82,7 +86,8 @@ class ExpenseManagementService:
                 )
             )
 
-    def settle_card_statement(self, amount: Money, on: date) -> None:
+    def reimburse_owner(self, amount: Money, on: date) -> None:
+        """The business pays the owner back — any amount, partial allowed."""
         with self._db.unit_of_work() as session:
-            session.add(_CardSettlement(amount_minor=amount.minor_units, on=on))
-            self._bus.publish(CardStatementSettled(amount=amount, on=on))
+            session.add(_OwnerReimbursement(amount_minor=amount.minor_units, on=on))
+            self._bus.publish(OwnerReimbursed(amount=amount, on=on))

@@ -1,6 +1,7 @@
 """Expense Management's published events — the contract the Ledger consumes
-(ADR-0006/0011). Buy-side outflow capture on the card rail; other contexts
-may import these event types but never Expense Management's tables.
+(ADR-0006/0011). The owner pays business expenses personally; the business
+owes the owner (ADR-0003, amended). Other contexts may import these event
+types but never Expense Management's tables.
 """
 
 from __future__ import annotations
@@ -12,9 +13,10 @@ from books.platform.money import Money
 
 
 @dataclass(frozen=True)
-class CardChargeCaptured:
-    """A card swipe. Accrues the expense against the card clearing account
-    (the only payable, ADR-0003) — the issuer, not the supplier, is owed."""
+class OwnerPaidExpenseRecorded:
+    """A business expense the owner paid personally. Recognized at the
+    charge against the Due-to-Owner payable (ADR-0003, amended). A supplier
+    Party is mandatory provenance; the personal card never enters."""
 
     party_id: int
     party_name: str
@@ -24,8 +26,9 @@ class CardChargeCaptured:
 
 
 @dataclass(frozen=True)
-class CardStatementSettled:
-    """The monthly card bill paid from the bank, clearing the liability."""
+class OwnerReimbursed:
+    """The business paid the owner back from the bank — any amount, partial
+    allowed. Draws down the fungible Due-to-Owner balance."""
 
     amount: Money
     on: date

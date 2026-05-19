@@ -20,8 +20,8 @@ from sqlalchemy import Date, ForeignKey, Integer, String, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from books.expense_management.events import (
-    CardChargeCaptured,
-    CardStatementSettled,
+    OwnerPaidExpenseRecorded,
+    OwnerReimbursed,
 )
 from books.invoicing.events import (
     InvoiceIssued,
@@ -38,7 +38,7 @@ BANK = "Bank"
 FX_LOSS = "FX Loss"  # dedicated realized-FX P&L account (ADR-0005)
 WRITE_OFF = "Write-off"  # guided-journal write-off contra
 OWNERS_EQUITY = "Owner's Equity"  # year-end P&L sweep target
-CARD_CLEARING = "Card Clearing"  # the only payable (ADR-0003)
+DUE_TO_OWNER = "Due to Owner"  # the only payable (ADR-0003, amended)
 _PNL_TYPES = ("income", "expense")
 
 
@@ -112,8 +112,8 @@ class LedgerService:
         bus.subscribe(InvoiceIssued, self._on_invoice_issued)
         bus.subscribe(PaymentRecorded, self._on_payment_recorded)
         bus.subscribe(SettlementAdjudicated, self._on_settlement_adjudicated)
-        bus.subscribe(CardChargeCaptured, self._on_card_charge_captured)
-        bus.subscribe(CardStatementSettled, self._on_card_statement_settled)
+        bus.subscribe(OwnerPaidExpenseRecorded, self._on_owner_paid_expense)
+        bus.subscribe(OwnerReimbursed, self._on_owner_reimbursed)
 
     # --- write side -----------------------------------------------------
 
@@ -314,32 +314,34 @@ class LedgerService:
                 ],
             )
 
-    def _on_card_charge_captured(self, e: CardChargeCaptured) -> None:
+    def _on_owner_paid_expense(self, e: OwnerPaidExpenseRecorded) -> None:
+        # Recognized at the charge; the business owes the owner (ADR-0003,
+        # amended). Supplier Party rides the expense leg as the dimension.
         amt = e.amount.minor_units
         with self._db.unit_of_work() as session:
             self._post(
                 session,
                 on=e.on,
-                narrative=f"Card charge: {e.party_name}",
-                source_kind="CardChargeCaptured",
+                narrative=f"Owner-paid expense: {e.party_name}",
+                source_kind="OwnerPaidExpenseRecorded",
                 source_id=str(e.party_id),
                 legs=[
                     (e.category_account, amt, e.party_id, e.party_name),
-                    (CARD_CLEARING, -amt, None, None),
+                    (DUE_TO_OWNER, -amt, None, None),
                 ],
             )
 
-    def _on_card_statement_settled(self, e: CardStatementSettled) -> None:
+    def _on_owner_reimbursed(self, e: OwnerReimbursed) -> None:
         amt = e.amount.minor_units
         with self._db.unit_of_work() as session:
             self._post(
                 session,
                 on=e.on,
-                narrative="Card statement settlement",
-                source_kind="CardStatementSettled",
+                narrative="Reimbursement to owner",
+                source_kind="OwnerReimbursed",
                 source_id=e.on.isoformat(),
                 legs=[
-                    (CARD_CLEARING, amt, None, None),
+                    (DUE_TO_OWNER, amt, None, None),
                     (BANK, -amt, None, None),
                 ],
             )

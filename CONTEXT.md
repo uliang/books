@@ -16,7 +16,7 @@ trust.
 | **Bank Reconciliation** | Core | Control: matches bank statement lines to ledger bank postings; owns clearance state; raises discrepancies for human review |
 | **General Ledger** | Supporting (correctness backbone) | System-of-record; mostly event-fed. Owns Chart of Accounts, Journal/Posting, period closing, the guarded guided-journal path |
 | **Invoicing/AR** | Supporting | Sell-side capture; upstream source of Accounts Receivable |
-| **Expense Management** | Supporting | Buy-side outflow capture (card + direct-bank rails) |
+| **Expense Management** | Supporting | Buy-side outflow capture (owner-reimbursable + direct-bank rails) |
 | **Party** | Generic | Shared master data; customer/supplier/contractor are roles |
 | **Reporting** | Generic | Pure derivable read model; no writes |
 
@@ -75,10 +75,22 @@ _Avoid_: conflating cleared with paid
 Customer-supplied proof of a bank transfer, attached to an invoice payment as
 audit evidence.
 
-**Credit-card clearing account**:
-A single liability account holding card charges between swipe and monthly
-settlement. The card issuer — not any supplier — is the creditor.
-_Avoid_: calling this Accounts Payable
+**Owner-reimbursable expense**:
+A business expense the owner pays personally (typically on a personal or
+mixed-use credit card). Recognized at the moment of the charge; the
+obligation is the business's, owed to the **owner**. Personal charges on the
+same card never enter the business books — only the individual business
+expenses do.
+_Avoid_: "card expense" (the card is personal and off the books), modelling
+the personal card statement
+
+**Due to Owner**:
+The single accrued payable (ADR-0003): the running liability the business
+owes the owner for owner-reimbursable expenses. `Dr Expense / Cr Due to
+Owner` at the charge; `Dr Due to Owner / Cr Bank` when the business
+reimburses the owner. Its balance is "how much I am owed" at any time.
+_Avoid_: Accounts Payable; credit-card clearing account; treating it as
+owner equity / an owner draw (reimbursement settles a debt, it is not a draw)
 
 **Contractor payment**:
 A categorized direct-bank outflow to a Party in the contractor role. The v1
@@ -132,8 +144,8 @@ real control signal (phantom payment, mis-keyed amount, unsettled slip).
 
 - **Invoicing → General Ledger**: event-driven, upstream/downstream. Ledger
   translates `InvoiceIssued` / `PaymentRecorded` into postings.
-- **Expense Management → General Ledger**: event-driven; charge captured,
-  monthly card claim settled, contractor paid.
+- **Expense Management → General Ledger**: event-driven; owner-reimbursable
+  expense captured, owner reimbursed, contractor paid.
 - **Bank Reconciliation → General Ledger**: matches `StatementLine ↔ ledger
   bank Posting`; owns the posting's clearance state; unmatched lines feed the
   guided-journal path.
@@ -179,5 +191,7 @@ real control signal (phantom payment, mis-keyed amount, unsettled slip).
 - "salary" implied employees/payroll — resolved: it means **contractor
   payment**, no employment.
 - "supplier" implied Accounts Payable — resolved: **Supplier is master data**;
-  cash basis on purchases, the only payable is the card clearing account.
+  cash basis on purchases, the only payable is **Due to Owner** (the
+  owner-reimbursement liability — the card is personal, not a business
+  creditor; superseded the earlier credit-card-clearing assumption).
 - "paid" vs "cleared" conflated — resolved: distinct concepts (see ADR-0004).

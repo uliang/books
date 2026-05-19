@@ -18,6 +18,7 @@ from sqlalchemy import Date, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from books.expense_management.events import (
+    ContractorPaid,
     OwnerPaidExpenseRecorded,
     OwnerReimbursed,
 )
@@ -42,6 +43,17 @@ class _OwnerReimbursement(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     amount_minor: Mapped[int] = mapped_column(Integer)
+    on: Mapped[date] = mapped_column(Date)
+
+
+class _ContractorPayment(Base):
+    __tablename__ = "contractor_payment"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    party_id: Mapped[int] = mapped_column(Integer)
+    party_name: Mapped[str] = mapped_column(String)
+    amount_minor: Mapped[int] = mapped_column(Integer)
+    category_account: Mapped[str] = mapped_column(String)
     on: Mapped[date] = mapped_column(Date)
 
 
@@ -91,3 +103,33 @@ class ExpenseManagementService:
         with self._db.unit_of_work() as session:
             session.add(_OwnerReimbursement(amount_minor=amount.minor_units, on=on))
             self._bus.publish(OwnerReimbursed(amount=amount, on=on))
+
+    def pay_contractor(
+        self,
+        party_id: int,
+        amount: Money,
+        category_account: str,
+        on: date,
+    ) -> None:
+        """A categorized direct-bank outflow to a contractor (CONTEXT). Pure
+        cash basis (ADR-0003): the expense is recognized as cash leaves."""
+        with self._db.unit_of_work() as session:
+            name = self._party_name(party_id)
+            session.add(
+                _ContractorPayment(
+                    party_id=party_id,
+                    party_name=name,
+                    amount_minor=amount.minor_units,
+                    category_account=category_account,
+                    on=on,
+                )
+            )
+            self._bus.publish(
+                ContractorPaid(
+                    party_id=party_id,
+                    party_name=name,
+                    amount=amount,
+                    category_account=category_account,
+                    on=on,
+                )
+            )

@@ -20,6 +20,7 @@ from sqlalchemy import Date, ForeignKey, Integer, String, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from books.expense_management.events import (
+    ContractorPaid,
     OwnerPaidExpenseRecorded,
     OwnerReimbursed,
 )
@@ -114,6 +115,7 @@ class LedgerService:
         bus.subscribe(SettlementAdjudicated, self._on_settlement_adjudicated)
         bus.subscribe(OwnerPaidExpenseRecorded, self._on_owner_paid_expense)
         bus.subscribe(OwnerReimbursed, self._on_owner_reimbursed)
+        bus.subscribe(ContractorPaid, self._on_contractor_paid)
 
     # --- write side -----------------------------------------------------
 
@@ -328,6 +330,23 @@ class LedgerService:
                 legs=[
                     (e.category_account, amt, e.party_id, e.party_name),
                     (DUE_TO_OWNER, -amt, None, None),
+                ],
+            )
+
+    def _on_contractor_paid(self, e: ContractorPaid) -> None:
+        # Pure cash basis (ADR-0003): no payable, the bank moves at once.
+        # Contractor Party rides the expense leg as the dimension.
+        amt = e.amount.minor_units
+        with self._db.unit_of_work() as session:
+            self._post(
+                session,
+                on=e.on,
+                narrative=f"Contractor payment: {e.party_name}",
+                source_kind="ContractorPaid",
+                source_id=str(e.party_id),
+                legs=[
+                    (e.category_account, amt, e.party_id, e.party_name),
+                    (BANK, -amt, None, None),
                 ],
             )
 

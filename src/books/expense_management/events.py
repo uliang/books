@@ -32,3 +32,16 @@ class OwnerReimbursed:
 
     amount: Money
     on: date
+
+
+@dataclass(frozen=True)
+class ContractorPaid:
+    """A categorized direct-bank outflow to a Party in the contractor role
+    (CONTEXT). Pure cash basis (ADR-0003): no accrual, no payable — the
+    expense is recognized as the cash leaves the bank."""
+
+    party_id: int
+    party_name: str
+    amount: Money
+    category_account: str
+    on: date

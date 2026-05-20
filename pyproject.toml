@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 books = "books:main"
+books-mcp = "books.interfaces.mcp.app:main"
 books-web = "books.interfaces.web.app:main"
 
 [build-system]

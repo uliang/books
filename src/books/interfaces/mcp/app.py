@@ -30,9 +30,11 @@ def create_mcp_server(books_app: App | None = None) -> FastMCP:
         """Return a simple status payload to verify the MCP server is reachable."""
         return {"status": "ok"}
 
+    from books.interfaces.mcp.resources import register as register_resources
     from books.interfaces.mcp.tools import register as register_tools
 
     register_tools(mcp, books)
+    register_resources(mcp, books)
 
     return mcp
 

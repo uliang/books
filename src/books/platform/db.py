@@ -21,6 +21,14 @@ class Base(DeclarativeBase):
 
 
 class Database:
+    """Engine container (ADR-0013, amended 2026-05-20). Transactions belong
+    to the per-context repository; this class only holds the SQLAlchemy
+    engine and runs ``create_all``. ``unit_of_work`` lives on
+    ``platform.repository.Repository`` (the persistence touchpoint a service
+    actually talks to). The legacy ``unit_of_work`` method is retained here
+    transiently for contexts not yet migrated to the repository pattern; it
+    is removed once every context has migrated."""
+
     def __init__(self, url: str = "sqlite://") -> None:
         self._engine = create_engine(
             url,
@@ -29,8 +37,14 @@ class Database:
         )
         Base.metadata.create_all(self._engine)
 
+    @property
+    def engine(self):
+        return self._engine
+
     @contextmanager
     def unit_of_work(self) -> Generator[Session]:
+        # Transient — used only by contexts not yet on the Repository
+        # pattern. Removed once the rollout completes.
         session = Session(self._engine)
         try:
             yield session

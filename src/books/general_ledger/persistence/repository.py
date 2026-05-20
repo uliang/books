@@ -50,6 +50,14 @@ class PostingRow:
     dimensions: dict[str, tuple[str, str]]  # type → (value_id, value_name)
 
 
+@dataclass(frozen=True, slots=True)
+class AccountRow:
+    code: str
+    name: str
+    type: str
+    control: bool
+
+
 class LedgerRepository(Repository):
     # --- commands -------------------------------------------------------
 
@@ -173,6 +181,16 @@ class LedgerRepository(Repository):
             .all()
         )
         return sum(rows)
+
+    def list_accounts(self, session: Session) -> list[AccountRow]:
+        """Every account on the Chart, ordered alphabetically by code for
+        a deterministic projection. Used by LedgerService.accounts() which
+        backs the MCP accounts:// resource."""
+        rows = session.execute(select(_Account).order_by(_Account.code)).scalars().all()
+        return [
+            AccountRow(code=r.code, name=r.name, type=r.type, control=r.control)
+            for r in rows
+        ]
 
     def postings_for(self, session: Session, code: str) -> list[PostingRow]:
         rows = (

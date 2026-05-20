@@ -70,3 +70,19 @@ def test_payment_recorded_posts_dr_bank_cr_ar_and_bank_posting_is_uncleared():
     assert len(bank) == 1
     assert bank[0].amount == Money.myr(1000_00)
     assert bank[0].date == date(2026, 1, 15)
+
+
+def test_accounts_returns_every_created_account_with_its_metadata():
+    from books import create_app
+
+    app = create_app("sqlite://")
+    app.ledger.create_account(code="Bank", name="Bank", type="asset")
+    app.ledger.create_account(code="AR", name="AR", type="asset", control=True)
+    app.ledger.create_account(code="Revenue", name="Revenue", type="income")
+
+    accounts = app.ledger.accounts()
+    by_code = {a.code: a for a in accounts}
+    assert set(by_code) == {"Bank", "AR", "Revenue"}
+    assert by_code["Bank"].type == "asset"
+    assert by_code["AR"].control is True
+    assert by_code["Revenue"].type == "income"

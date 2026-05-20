@@ -10,6 +10,9 @@
 
 Clearance is *not* stored on the Ledger posting; a posting is cleared iff a
 Match references it (ADR-0010).
+
+Persistence is owned by :class:`BankReconciliationRepository` (ADR-0013
+amendment 2026-05-20); the service holds only ``self._repo``.
 """
 
 from __future__ import annotations
@@ -20,55 +23,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import (
-    Date,
-    DateTime,
-    Integer,
-    String,
-    UniqueConstraint,
-    select,
+from books.bank_reconciliation.persistence.repository import (
+    BankReconciliationRepository,
 )
-from sqlalchemy.orm import Mapped, mapped_column
-
 from books.general_ledger.service import PostingView
-from books.platform.db import Base, Database
+from books.platform.db import Database
 from books.platform.money import Money
-
-
-class _Statement(Base):
-    __tablename__ = "br_statement"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    account: Mapped[str] = mapped_column(String)
-    period: Mapped[str] = mapped_column(String)
-    opening_minor: Mapped[int] = mapped_column(Integer)
-    closing_minor: Mapped[int] = mapped_column(Integer)
-    content_hash: Mapped[str] = mapped_column(String, unique=True)
-
-
-class _Line(Base):
-    __tablename__ = "br_line"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    statement_id: Mapped[int] = mapped_column(Integer)
-    account: Mapped[str] = mapped_column(String)
-    period: Mapped[str] = mapped_column(String)
-    date: Mapped[date] = mapped_column(Date)
-    amount_minor: Mapped[int] = mapped_column(Integer)
-    description: Mapped[str] = mapped_column(String)
-
-
-class _Match(Base):
-    __tablename__ = "br_match"
-    __table_args__ = (
-        UniqueConstraint("statement_line_ref"),
-        UniqueConstraint("ledger_posting_ref"),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    statement_line_ref: Mapped[int] = mapped_column(Integer)
-    ledger_posting_ref: Mapped[int] = mapped_column(Integer)
-    confirmed_at: Mapped[datetime] = mapped_column(DateTime)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +72,7 @@ class BankReconciliationService:
         db: Database,
         bank_postings: Callable[[str], list[PostingView]],
     ) -> None:
-        self._db = db
+        self._repo = BankReconciliationRepository(db)
         self._bank_postings = bank_postings
 
     # --- import ACL (ADR-0018) -----------------------------------------
@@ -127,10 +87,8 @@ class BankReconciliationService:
         fmt: str = "csv",
     ) -> Statement:
         content_hash = hashlib.sha256(raw.encode()).hexdigest()
-        with self._db.unit_of_work() as session:
-            existing = session.execute(
-                select(_Statement).where(_Statement.content_hash == content_hash)
-            ).scalar_one_or_none()
+        with self._repo.unit_of_work() as session:
+            existing = self._repo.find_statement_by_hash(session, content_hash)
             if existing is not None:
                 return Statement(id=existing.id, foots=True)
 
@@ -142,89 +100,50 @@ class BankReconciliationService:
                     f"{opening.minor_units} + {total} != "
                     f"{closing.minor_units}"
                 )
-
-            stmt = _Statement(
+            stmt = self._repo.add_statement(
+                session,
                 account=account,
                 period=period,
                 opening_minor=opening.minor_units,
                 closing_minor=closing.minor_units,
                 content_hash=content_hash,
+                lines=parsed,
             )
-            session.add(stmt)
-            session.flush()
-            for d, minor, description in parsed:
-                session.add(
-                    _Line(
-                        statement_id=stmt.id,
-                        account=account,
-                        period=period,
-                        date=d,
-                        amount_minor=minor,
-                        description=description,
-                    )
-                )
             return Statement(id=stmt.id, foots=True)
 
     # --- query side -----------------------------------------------------
 
     def statement_lines(self, account: str, period: str) -> list[StatementLineView]:
-        with self._db.unit_of_work() as session:
-            rows = (
-                session.execute(
-                    select(_Line)
-                    .where(_Line.account == account)
-                    .where(_Line.period == period)
-                    .order_by(_Line.id)
-                )
-                .scalars()
-                .all()
+        with self._repo.unit_of_work() as session:
+            rows = self._repo.lines_for(session, account, period)
+        return [
+            StatementLineView(
+                ref=r.id,
+                date=r.date,
+                amount=Money.myr(r.amount_minor),
+                description=r.description,
             )
-            return [
-                StatementLineView(
-                    ref=r.id,
-                    date=r.date,
-                    amount=Money.myr(r.amount_minor),
-                    description=r.description,
-                )
-                for r in rows
-            ]
+            for r in rows
+        ]
 
     def statement_closing(self, account: str, period: str) -> Money:
-        with self._db.unit_of_work() as session:
-            row = (
-                session.execute(
-                    select(_Statement)
-                    .where(_Statement.account == account)
-                    .where(_Statement.period == period)
-                    .order_by(_Statement.id.desc())
-                )
-                .scalars()
-                .first()
-            )
-            return Money.myr(row.closing_minor if row else 0)
+        with self._repo.unit_of_work() as session:
+            return Money.myr(self._repo.latest_closing_minor(session, account, period))
 
     def matched_posting_refs(self) -> set[int]:
-        with self._db.unit_of_work() as session:
-            return set(
-                session.execute(select(_Match.ledger_posting_ref)).scalars().all()
-            )
+        with self._repo.unit_of_work() as session:
+            return self._repo.matched_posting_refs(session)
 
     def matched_line_refs(self) -> set[int]:
-        with self._db.unit_of_work() as session:
-            return set(
-                session.execute(select(_Match.statement_line_ref)).scalars().all()
-            )
+        with self._repo.unit_of_work() as session:
+            return self._repo.matched_line_refs(session)
 
     # --- propose (read-only, ADR-0015) ---------------------------------
 
     def propose_matches(self, account: str, period: str) -> list[Proposal]:
-        with self._db.unit_of_work() as session:
-            matched_lines = set(
-                session.execute(select(_Match.statement_line_ref)).scalars().all()
-            )
-            matched_postings = set(
-                session.execute(select(_Match.ledger_posting_ref)).scalars().all()
-            )
+        with self._repo.unit_of_work() as session:
+            matched_lines = self._repo.matched_line_refs(session)
+            matched_postings = self._repo.matched_posting_refs(session)
         lines = [
             ln
             for ln in self.statement_lines(account, period)
@@ -249,32 +168,32 @@ class BankReconciliationService:
     # --- confirm (sole write, ADR-0015) --------------------------------
 
     def confirm_match(self, statement_line_ref: int, ledger_posting_ref: int) -> None:
-        with self._db.unit_of_work() as session:
-            existing = session.execute(
-                select(_Match)
-                .where(_Match.statement_line_ref == statement_line_ref)
-                .where(_Match.ledger_posting_ref == ledger_posting_ref)
-            ).scalar_one_or_none()
-            if existing is not None:
-                return  # idempotent on identical resubmit
-
-            clash = session.execute(
-                select(_Match).where(
-                    (_Match.statement_line_ref == statement_line_ref)
-                    | (_Match.ledger_posting_ref == ledger_posting_ref)
+        with self._repo.unit_of_work() as session:
+            if (
+                self._repo.find_match(
+                    session,
+                    line_ref=statement_line_ref,
+                    posting_ref=ledger_posting_ref,
                 )
-            ).scalar_one_or_none()
-            if clash is not None:
+                is not None
+            ):
+                return  # idempotent on identical resubmit
+            if (
+                self._repo.find_clash(
+                    session,
+                    line_ref=statement_line_ref,
+                    posting_ref=ledger_posting_ref,
+                )
+                is not None
+            ):
                 raise ValueError(
                     "already matched: line "
                     f"{statement_line_ref} / posting "
                     f"{ledger_posting_ref}"
                 )
-
-            session.add(
-                _Match(
-                    statement_line_ref=statement_line_ref,
-                    ledger_posting_ref=ledger_posting_ref,
-                    confirmed_at=datetime.now(),
-                )
+            self._repo.record_match(
+                session,
+                line_ref=statement_line_ref,
+                posting_ref=ledger_posting_ref,
+                at=datetime.now(),
             )

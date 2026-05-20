@@ -14,47 +14,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import date
 
-from sqlalchemy import Date, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
-
 from books.expense_management.events import (
     ContractorPaid,
     OwnerPaidExpenseRecorded,
     OwnerReimbursed,
 )
-from books.platform.db import Base, Database
+from books.expense_management.persistence.repository import ExpenseRepository
+from books.platform.db import Database
 from books.platform.events import EventBus
 from books.platform.money import Money
-
-
-class _OwnerPaidExpense(Base):
-    __tablename__ = "owner_paid_expense"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    party_id: Mapped[int] = mapped_column(Integer)
-    party_name: Mapped[str] = mapped_column(String)
-    amount_minor: Mapped[int] = mapped_column(Integer)
-    category_account: Mapped[str] = mapped_column(String)
-    on: Mapped[date] = mapped_column(Date)
-
-
-class _OwnerReimbursement(Base):
-    __tablename__ = "owner_reimbursement"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    amount_minor: Mapped[int] = mapped_column(Integer)
-    on: Mapped[date] = mapped_column(Date)
-
-
-class _ContractorPayment(Base):
-    __tablename__ = "contractor_payment"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    party_id: Mapped[int] = mapped_column(Integer)
-    party_name: Mapped[str] = mapped_column(String)
-    amount_minor: Mapped[int] = mapped_column(Integer)
-    category_account: Mapped[str] = mapped_column(String)
-    on: Mapped[date] = mapped_column(Date)
 
 
 class ExpenseManagementService:
@@ -64,7 +32,7 @@ class ExpenseManagementService:
         bus: EventBus,
         party_name: Callable[[int], str],
     ) -> None:
-        self._db = db
+        self._repo = ExpenseRepository(db)
         self._bus = bus
         self._party_name = party_name
 
@@ -77,16 +45,15 @@ class ExpenseManagementService:
     ) -> None:
         """A business expense the owner paid personally — recognized now
         against Due to Owner. ``party_id`` (the supplier) is required."""
-        with self._db.unit_of_work() as session:
-            name = self._party_name(party_id)
-            session.add(
-                _OwnerPaidExpense(
-                    party_id=party_id,
-                    party_name=name,
-                    amount_minor=amount.minor_units,
-                    category_account=category_account,
-                    on=on,
-                )
+        name = self._party_name(party_id)
+        with self._repo.unit_of_work() as session:
+            self._repo.add_owner_paid_expense(
+                session,
+                party_id=party_id,
+                party_name=name,
+                amount_minor=amount.minor_units,
+                category_account=category_account,
+                on=on,
             )
             self._bus.publish(
                 OwnerPaidExpenseRecorded(
@@ -100,8 +67,10 @@ class ExpenseManagementService:
 
     def reimburse_owner(self, amount: Money, on: date) -> None:
         """The business pays the owner back — any amount, partial allowed."""
-        with self._db.unit_of_work() as session:
-            session.add(_OwnerReimbursement(amount_minor=amount.minor_units, on=on))
+        with self._repo.unit_of_work() as session:
+            self._repo.add_owner_reimbursement(
+                session, amount_minor=amount.minor_units, on=on
+            )
             self._bus.publish(OwnerReimbursed(amount=amount, on=on))
 
     def pay_contractor(
@@ -113,16 +82,15 @@ class ExpenseManagementService:
     ) -> None:
         """A categorized direct-bank outflow to a contractor (CONTEXT). Pure
         cash basis (ADR-0003): the expense is recognized as cash leaves."""
-        with self._db.unit_of_work() as session:
-            name = self._party_name(party_id)
-            session.add(
-                _ContractorPayment(
-                    party_id=party_id,
-                    party_name=name,
-                    amount_minor=amount.minor_units,
-                    category_account=category_account,
-                    on=on,
-                )
+        name = self._party_name(party_id)
+        with self._repo.unit_of_work() as session:
+            self._repo.add_contractor_payment(
+                session,
+                party_id=party_id,
+                party_name=name,
+                amount_minor=amount.minor_units,
+                category_account=category_account,
+                on=on,
             )
             self._bus.publish(
                 ContractorPaid(

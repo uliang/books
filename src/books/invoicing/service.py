@@ -21,32 +21,15 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import Date, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
-
 from books.invoicing.events import (
     InvoiceIssued,
     PaymentRecorded,
     SettlementAdjudicated,
 )
-from books.platform.db import Base, Database
+from books.invoicing.persistence.repository import InvoiceRepository
+from books.platform.db import Database
 from books.platform.events import EventBus
 from books.platform.money import Currency, Money
-
-
-class _Invoice(Base):
-    __tablename__ = "invoice"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    number: Mapped[int] = mapped_column(Integer, unique=True)
-    party_id: Mapped[int] = mapped_column(Integer)
-    amount_minor: Mapped[int] = mapped_column(Integer)  # transaction currency
-    currency: Mapped[str] = mapped_column(String)  # transaction currency
-    rate: Mapped[str] = mapped_column(String)  # txn→MYR booking rate
-    carrying_minor: Mapped[int] = mapped_column(Integer)  # functional MYR
-    banked_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    issued_on: Mapped[date] = mapped_column(Date)
-    status: Mapped[str] = mapped_column(String, default="issued")
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +62,7 @@ class InvoicingService:
         bus: EventBus,
         party_name: Callable[[int], str],
     ) -> None:
-        self._db = db
+        self._repo = InvoiceRepository(db)
         self._bus = bus
         self._party_name = party_name
 
@@ -94,8 +77,9 @@ class InvoicingService:
         if amount.currency is Currency.MYR:
             rate = Decimal(1)
         carrying_minor = _to_myr(amount.minor_units, rate)
-        with self._db.unit_of_work() as session:
-            row = _Invoice(
+        with self._repo.unit_of_work() as session:
+            row = self._repo.add(
+                session,
                 number=number,
                 party_id=party_id,
                 amount_minor=amount.minor_units,
@@ -104,9 +88,6 @@ class InvoicingService:
                 carrying_minor=carrying_minor,
                 issued_on=issued_on,
             )
-            session.add(row)
-            session.flush()
-            invoice = Invoice(id=row.id, number=row.number)
             # The Ledger is MYR system-of-record: it sees the carrying value.
             self._bus.publish(
                 InvoiceIssued(
@@ -117,7 +98,7 @@ class InvoicingService:
                     issued_on=issued_on,
                 )
             )
-            return invoice
+            return Invoice(id=row.id, number=row.number)
 
     def mark_paid(
         self,
@@ -125,40 +106,46 @@ class InvoicingService:
         paid_on: date,
         banked: Money | None = None,
     ) -> None:
-        with self._db.unit_of_work() as session:
-            row = session.get(_Invoice, invoice_id)
-            if row is None:
+        with self._repo.unit_of_work() as session:
+            invoice = self._repo.get(session, invoice_id)
+            if invoice is None:
                 raise LookupError(f"no invoice {invoice_id}")
             # Default: the full carrying value landed (domestic case).
-            banked_minor = row.carrying_minor if banked is None else banked.minor_units
-            row.banked_minor = banked_minor
+            banked_minor = (
+                invoice.carrying_minor if banked is None else banked.minor_units
+            )
             # Record only what moved; an MYR shortfall stays open until the
             # owner adjudicates (ADR-0005) — never auto-resolved.
-            row.status = (
+            status = (
                 "paid"
-                if banked_minor >= row.carrying_minor
+                if banked_minor >= invoice.carrying_minor
                 else "awaiting_adjudication"
+            )
+            self._repo.record_payment(
+                session, invoice_id, banked_minor=banked_minor, status=status
             )
             self._bus.publish(
                 PaymentRecorded(
-                    invoice_number=row.number,
-                    party_id=row.party_id,
+                    invoice_number=invoice.number,
+                    party_id=invoice.party_id,
                     amount=Money.myr(banked_minor),
                     paid_on=paid_on,
                 )
             )
 
     def settlement_picture(self, invoice_id: int) -> SettlementPicture:
-        with self._db.unit_of_work() as session:
-            row = session.get(_Invoice, invoice_id)
-            if row is None:
+        with self._repo.unit_of_work() as session:
+            invoice = self._repo.get(session, invoice_id)
+            if invoice is None:
                 raise LookupError(f"no invoice {invoice_id}")
-            banked_minor = row.banked_minor or 0
+            banked_minor = invoice.banked_minor or 0
             return SettlementPicture(
-                transaction_amount=Money(row.amount_minor, Currency(row.currency)),
-                carrying=Money.myr(row.carrying_minor),
+                transaction_amount=Money(
+                    invoice.amount_minor, Currency(invoice.currency)
+                ),
+                carrying=Money.myr(invoice.carrying_minor),
                 banked=Money.myr(banked_minor),
-                shortfall=Money.myr(row.carrying_minor - banked_minor),
+                shortfall=Money.myr(invoice.carrying_minor - banked_minor),
             )
 
     def adjudicate_settlement(
@@ -167,25 +154,25 @@ class InvoicingService:
         outcome: str,
         on: date,
     ) -> None:
-        with self._db.unit_of_work() as session:
-            row = session.get(_Invoice, invoice_id)
-            if row is None:
+        with self._repo.unit_of_work() as session:
+            invoice = self._repo.get(session, invoice_id)
+            if invoice is None:
                 raise LookupError(f"no invoice {invoice_id}")
-            shortfall = row.carrying_minor - (row.banked_minor or 0)
+            shortfall = invoice.carrying_minor - (invoice.banked_minor or 0)
             if outcome == "settled_in_full":
-                row.status = "paid"
+                self._repo.set_status(session, invoice_id, "paid")
                 # Realized FX loss, recognized only at settlement, posted by
                 # the Ledger's guided-journal path (ADR-0005/0006).
                 self._bus.publish(
                     SettlementAdjudicated(
-                        invoice_number=row.number,
-                        party_id=row.party_id,
+                        invoice_number=invoice.number,
+                        party_id=invoice.party_id,
                         fx_loss=Money.myr(shortfall),
                         on=on,
                     )
                 )
             elif outcome == "still_owes":
                 # No FX recognition: AR stays open for the shortfall.
-                row.status = "partially_paid"
+                self._repo.set_status(session, invoice_id, "partially_paid")
             else:
                 raise ValueError(f"unknown adjudication outcome: {outcome!r}")

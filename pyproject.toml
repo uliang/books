@@ -102,6 +102,29 @@ source_modules = [
 ]
 forbidden_modules = ["books.reporting"]
 
+# Reporting reads across contexts ONLY through their service APIs
+# (ADR-0013 amendment 2026-05-20): with persistence now a private subpackage
+# per context, this contract makes the existing convention enforceable.
+# The reporting-leaf contract above only stops things importing reporting;
+# it says nothing about what reporting may reach into.
+[[tool.importlinter.contracts]]
+name = "reporting reads contexts via their service API, not persistence"
+type = "forbidden"
+source_modules = ["books.reporting"]
+forbidden_modules = [
+    "books.party.persistence",
+    "books.invoicing.persistence",
+    "books.expense_management.persistence",
+    "books.general_ledger.persistence",
+    "books.bank_reconciliation.persistence",
+]
+# Only flag DIRECT imports of persistence from reporting. The transitive
+# chain reporting → <context>.service → <context>.persistence is fine —
+# that's the service legitimately using its own persistence on reporting's
+# behalf via the query API. What we forbid is reporting reaching into a
+# foreign context's persistence itself.
+allow_indirect_imports = "True"
+
 # interfaces/ is the outermost adapter leaf: nothing in the domain may
 # depend on it (ADR-0013 discipline; web-interface tracer slice).
 [[tool.importlinter.contracts]]

@@ -158,6 +158,10 @@ ignore_imports = [
     # The transitive path books.interfaces -> books -> books.platform.* is
     # sanctioned; only a *direct* interfaces -> platform edge is prohibited.
     "books.interfaces.web.app -> books",
+    # MCP interface modules — same rationale as the web app above.
+    "books.interfaces.mcp.app -> books",
+    "books.interfaces.mcp.tools -> books",
+    "books.interfaces.mcp.resources -> books",
 ]
 
 [tool.djlint]

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from books.party.persistence.tables import _Party
@@ -30,3 +31,7 @@ class PartyRepository(Repository):
         if row is None:
             return None
         return PartyRow(id=row.id, name=row.name, role=row.role)
+
+    def list_all(self, session: Session) -> list[PartyRow]:
+        rows = session.execute(select(_Party).order_by(_Party.id)).scalars().all()
+        return [PartyRow(id=r.id, name=r.name, role=r.role) for r in rows]

@@ -33,3 +33,7 @@ class PartyService:
             if row is None:
                 raise LookupError(f"no party {party_id}")
             return Party(id=row.id, name=row.name)
+
+    def list(self) -> list[Party]:
+        with self._repo.unit_of_work() as session:
+            return [Party(id=r.id, name=r.name) for r in self._repo.list_all(session)]

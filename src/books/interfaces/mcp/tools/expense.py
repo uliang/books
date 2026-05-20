@@ -67,3 +67,18 @@ def register(mcp: FastMCP, books: App) -> None:
             on=date_from(on),
         )
         return {"paid": True}
+
+    @mcp.tool()
+    def reimburse_owner(amount_minor: int, currency: str, on: str) -> dict:
+        """Reimburse the owner — any amount, partial allowed.
+
+        Posts Dr "Due to Owner" / Cr "Bank" via the OwnerReimbursed
+        event. The Bank posting reconciles on the existing spine.
+        Due to Owner is fungible (not tied to specific charges, per
+        the ADR-0003 amendment).
+        """
+        books.expense.reimburse_owner(
+            amount=money_from_minor(amount_minor, currency),
+            on=date_from(on),
+        )
+        return {"reimbursed": True}

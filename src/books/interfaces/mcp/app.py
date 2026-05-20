@@ -8,9 +8,14 @@ backed default that coexists with books-web on the same SQLite file.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from mcp.server.fastmcp import FastMCP
 
-from books import App, create_app
+from books import create_app
+
+if TYPE_CHECKING:
+    from books import App
 
 
 def create_mcp_server(books_app: App | None = None) -> FastMCP:
@@ -25,8 +30,9 @@ def create_mcp_server(books_app: App | None = None) -> FastMCP:
         """Return a simple status payload to verify the MCP server is reachable."""
         return {"status": "ok"}
 
-    # Real tools/resources are wired here as their modules land in
-    # subsequent tasks. Until then, only `health` is registered.
+    from books.interfaces.mcp.tools import register as register_tools
+
+    register_tools(mcp, books)
 
     return mcp
 

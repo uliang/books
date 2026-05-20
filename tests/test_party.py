@@ -31,3 +31,4 @@ def test_list_returns_all_registered_parties_in_insertion_order():
     parties = svc.list()
     assert [p.id for p in parties] == [a.id, b.id]
     assert [p.name for p in parties] == ["Acme", "Beta"]
+    assert [p.role for p in parties] == ["customer", "supplier"]

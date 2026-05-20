@@ -8,18 +8,13 @@ backed default that coexists with books-web on the same SQLite file.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from mcp.server.fastmcp import FastMCP
 
-from books import create_app
-
-if TYPE_CHECKING:
-    from books import App
+from books import App, create_app
 
 
 def create_mcp_server(books_app: App | None = None) -> FastMCP:
-    books = books_app or create_app(db_url="sqlite:///books.db")  # noqa: F841 — captured by tool closures added in Tasks 5–7
+    books = books_app or create_app(db_url="sqlite:///books.db")
     mcp = FastMCP("books")
 
     # A trivial health tool, present to (a) make the otherwise empty

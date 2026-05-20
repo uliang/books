@@ -20,6 +20,7 @@ def test_parties_resource_lists_all_registered_parties():
             # `.text` is the JSON-encoded payload from our handler.
             payload = json.loads(result.contents[0].text)
             assert [p["name"] for p in payload] == ["Acme", "CloudCo"]
+            assert [p["role"] for p in payload] == ["customer", "supplier"]
 
     run(scenario())
 

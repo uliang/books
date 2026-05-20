@@ -18,7 +18,9 @@ def register(mcp: FastMCP, books: App) -> None:
     @mcp.resource("parties://")
     def list_parties() -> str:
         """Every Party registered in the books, in insertion order."""
-        return json.dumps([{"id": p.id, "name": p.name} for p in books.party.list()])
+        parties = books.party.list()
+        payload = [{"id": p.id, "name": p.name, "role": p.role} for p in parties]
+        return json.dumps(payload)
 
     @mcp.resource("accounts://")
     def list_accounts() -> str:

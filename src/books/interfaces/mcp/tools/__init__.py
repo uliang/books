@@ -3,12 +3,9 @@ area (setup, expense), registered here against a captured App."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from mcp.server.fastmcp import FastMCP
 
-if TYPE_CHECKING:
-    from books import App
+from books import App
 
 
 def register(mcp: FastMCP, books: App) -> None:

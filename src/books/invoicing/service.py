@@ -49,6 +49,22 @@ class SettlementPicture:
     shortfall: Money  # MYR carrying − banked (0 if none)
 
 
+@dataclass(frozen=True, slots=True)
+class InvoiceView:
+    """A row for the invoices:// read surface: the persisted invoice plus the
+    resolved (cached-name) Party, so an agent can list and target invoices."""
+
+    id: int
+    number: int
+    party_id: int
+    party_name: str
+    currency: str  # transaction currency
+    amount_minor: int  # transaction currency
+    carrying_minor: int  # functional MYR booked into AR
+    banked_minor: int | None
+    status: str
+
+
 def _to_myr(minor: int, rate: Decimal) -> int:
     """Translate transaction-currency minor units to functional MYR minor
     units at the booking rate, rounding half-up to the minor unit."""
@@ -176,3 +192,21 @@ class InvoicingService:
                 self._repo.set_status(session, invoice_id, "partially_paid")
             else:
                 raise ValueError(f"unknown adjudication outcome: {outcome!r}")
+
+    def list_invoices(self) -> list[InvoiceView]:
+        with self._repo.unit_of_work() as session:
+            rows = self._repo.list_all(session)
+        return [
+            InvoiceView(
+                id=r.id,
+                number=r.number,
+                party_id=r.party_id,
+                party_name=self._party_name(r.party_id),
+                currency=r.currency,
+                amount_minor=r.amount_minor,
+                carrying_minor=r.carrying_minor,
+                banked_minor=r.banked_minor,
+                status=r.status,
+            )
+            for r in rows
+        ]

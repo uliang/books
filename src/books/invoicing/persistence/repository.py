@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from books.invoicing.persistence.tables import _Invoice
@@ -89,3 +90,7 @@ class InvoiceRepository(Repository):
         if row is None:
             raise LookupError(f"no invoice {invoice_id}")
         row.status = status
+
+    def list_all(self, session: Session) -> list[InvoiceRow]:
+        rows = session.execute(select(_Invoice).order_by(_Invoice.id)).scalars().all()
+        return [_row_to_snapshot(r) for r in rows]

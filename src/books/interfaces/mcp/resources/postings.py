@@ -8,6 +8,7 @@ URI template: postings://{account_code}
 from __future__ import annotations
 
 import json
+from urllib.parse import unquote
 
 from mcp.server.fastmcp import FastMCP
 
@@ -21,7 +22,12 @@ def register(mcp: FastMCP, books: App) -> None:
 
         Each posting includes its ADR-0007 dimensions (party in v1) so
         the agent can verify supplier provenance is preserved.
+
+        The path param arrives percent-encoded (MCP URIs reject raw
+        spaces), so decode it before lookup — otherwise codes like the
+        default "Due to Owner" role are unreachable.
         """
+        account_code = unquote(account_code)
         postings = books.ledger.postings_for(code=account_code)
         return json.dumps(
             [

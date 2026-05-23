@@ -69,3 +69,43 @@ def test_year_end_blockers_resource_shows_stale_bank_posting_via_mcp():
             assert blockers[0]["currency"] == "MYR"
 
     run(scenario())
+
+
+def test_soft_close_locks_month_via_mcp():
+    app = create_app("sqlite://")
+    app.ledger.create_account(
+        code="AR", name="Accounts Receivable", type="asset", control=True
+    )
+    app.ledger.create_account(code="Revenue", name="Revenue", type="income")
+    customer = app.party.register_party(name="Acme", role="customer")
+
+    async def scenario():
+        async with mcp_client(app) as client:
+            result = json.loads(
+                (await client.call_tool("soft_close", {"period": "2026-03"}))
+                .content[0]
+                .text
+            )
+            assert result == {"status": "soft_closed", "period": "2026-03"}
+
+            rows = json.loads(
+                (await client.read_resource("closings://")).contents[0].text
+            )
+            assert {"period": "2026-03", "kind": "soft"} in rows
+
+            # A new economic entry dated into the locked month is rejected.
+            rejected = await client.call_tool(
+                "issue_invoice",
+                {
+                    "number": 1,
+                    "party_id": customer.id,
+                    "amount_minor": 500_00,
+                    "currency": "MYR",
+                    "issued_on": "2026-03-15",
+                },
+            )
+            assert rejected.isError is True
+            text = rejected.content[0].text
+            assert "2026-03" in text or "closed" in text.lower()
+
+    run(scenario())

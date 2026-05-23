@@ -45,10 +45,9 @@ def register(mcp: FastMCP, books: App) -> None:
         path, locks all 12 months, and the fiscal year becomes immutable."""
         blockers = books.reporting.year_end_blockers(year)
         if blockers:
-            # year_end_blockers returns only stale exceptions (timing
-            # differences don't block, ADR-0009), so classification is
-            # constant here and omitted; the year-end-blockers:// resource
-            # carries it for the general pre-flight view.
+            # Any uncleared bank posting blocks (ADR-0009 amended); each
+            # carries its timing/stale classification so the agent can guide
+            # the owner (chase a late statement vs write off a phantom).
             return {
                 "status": "blocked",
                 "blockers": [
@@ -57,6 +56,7 @@ def register(mcp: FastMCP, books: App) -> None:
                         "amount_minor": b.amount.minor_units,
                         "currency": b.amount.currency.value,
                         "age_days": b.age_days,
+                        "classification": b.classification,
                     }
                     for b in blockers
                 ],

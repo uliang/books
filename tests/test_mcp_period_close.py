@@ -273,3 +273,44 @@ def test_hard_close_blocked_then_closes_after_write_off_via_mcp():
     assert app.ledger.account_balance(code="Revenue") == Money.myr(0)
     assert app.ledger.account_balance(code="Write-off") == Money.myr(0)
     assert app.ledger.account_balance(code="Owner's Equity") == Money.myr(0)
+
+
+def test_hard_close_blocked_reports_recent_item_as_timing_via_mcp():
+    app = create_app("sqlite://")
+    app.ledger.create_account(
+        code="AR", name="Accounts Receivable", type="asset", control=True
+    )
+    app.ledger.create_account(code="Revenue", name="Revenue", type="income")
+    app.ledger.create_account(code="Bank", name="Bank", type="asset")
+    customer = app.party.register_party(name="Acme", role="customer")
+
+    async def scenario():
+        async with mcp_client(app) as client:
+            issued = json.loads(
+                (
+                    await client.call_tool(
+                        "issue_invoice",
+                        {
+                            "number": 1,
+                            "party_id": customer.id,
+                            "amount_minor": 1000_00,
+                            "currency": "MYR",
+                            "issued_on": "2026-12-15",
+                        },
+                    )
+                )
+                .content[0]
+                .text
+            )
+            await client.call_tool(
+                "mark_paid",
+                {"invoice_id": issued["invoice_id"], "paid_on": "2026-12-20"},
+            )
+            blocked = json.loads(
+                (await client.call_tool("hard_close", {"year": 2026})).content[0].text
+            )
+            assert blocked["status"] == "blocked"
+            assert len(blocked["blockers"]) == 1
+            assert blocked["blockers"][0]["classification"] == "timing_difference"
+
+    run(scenario())

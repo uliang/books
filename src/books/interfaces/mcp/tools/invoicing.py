@@ -77,3 +77,22 @@ def register(mcp: FastMCP, books: App) -> None:
             "paid" if picture.shortfall.minor_units <= 0 else "awaiting_adjudication"
         )
         return {"status": status}
+
+    @mcp.tool()
+    def adjudicate_settlement(invoice_id: int, outcome: str, on: str) -> dict:
+        """Resolve a foreign-invoice MYR shortfall (ADR-0005 / ADR-0019).
+
+        `outcome` is supplied explicitly by the caller — the system never
+        infers FX vs underpayment:
+        - "settled_in_full": the gap is realized FX loss; emits
+          SettlementAdjudicated → GL Dr FX Loss / Cr AR. Status → "paid".
+        - "still_owes": a genuine underpayment; AR stays open, no FX posted.
+          Status → "partially_paid".
+        Any other outcome raises ValueError (surfaces as an error result).
+        """
+        books.invoicing.adjudicate_settlement(
+            invoice_id=invoice_id,
+            outcome=outcome,
+            on=date_from(on),
+        )
+        return {"status": "paid" if outcome == "settled_in_full" else "partially_paid"}

@@ -4,9 +4,9 @@
   never blocks on uncleared items.
 - write_off: guided-journal Dr Write-off / Cr Bank that clears a phantom
   bank posting out of the uncleared set (unblocks a hard close).
-- hard_close: blocks while stale uncleared items remain (returns them as a
-  structured "blocked" result, ADR-0019 spirit); otherwise sweeps net P&L
-  to Owner's Equity and locks the whole fiscal year.
+- hard_close: blocks while any uncleared bank posting remains (returns them
+  as a structured "blocked" result, ADR-0019 spirit); otherwise sweeps net
+  P&L to Owner's Equity and locks the whole fiscal year.
 """
 
 from __future__ import annotations

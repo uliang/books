@@ -25,3 +25,20 @@ def register(mcp: FastMCP, books: App) -> None:
                 for lk in books.ledger.locked_periods()
             ]
         )
+
+    @mcp.resource("year-end-blockers://{year}")
+    def year_end_blockers(year: str) -> str:
+        """Stale uncleared bank postings blocking the {year} hard close.
+        Path params arrive as strings, so coerce to int before lookup."""
+        return json.dumps(
+            [
+                {
+                    "ref": b.ref,
+                    "amount_minor": b.amount.minor_units,
+                    "currency": b.amount.currency.value,
+                    "age_days": b.age_days,
+                    "classification": b.classification,
+                }
+                for b in books.reporting.year_end_blockers(int(year))
+            ]
+        )

@@ -182,15 +182,16 @@ class LedgerService:
             )
 
     def hard_close(self, year: int) -> None:
-        """Annual hard close (ADR-0009). Blocks while any uncleared bank
-        posting is unresolved (a stale exception); once clear, sweeps net
-        P&L into Owner's Equity via the guided-journal path and locks every
-        month of the year, after which the fiscal year is immutable."""
+        """Annual hard close (ADR-0009, amended). Blocks while ANY bank
+        posting is uncleared — matched to a statement or written off are the
+        only resolutions, regardless of age; once clear, sweeps net P&L into
+        Owner's Equity via the guided-journal path and locks every month of
+        the year, after which the fiscal year is immutable."""
         blockers = self._year_end_blockers(year)
         if blockers:
             raise ValueError(
                 f"hard close {year} blocked: {len(blockers)} unresolved "
-                "stale uncleared item(s) — classify or adjudicate first"
+                "uncleared item(s) — reconcile or write off first"
             )
         on = date(year, 12, 31)
         with self._repo.unit_of_work() as session:
@@ -373,6 +374,8 @@ class LedgerService:
         ]
 
     def written_off_refs(self) -> set[int]:
-        """Bank-posting refs resolved by a guided-journal write-off."""
+        """Bank-posting refs to exclude from year-end blockers: both the
+        original postings resolved by a write-off and the write-off entries'
+        own Cr Bank reversal legs (see the repository method for detail)."""
         with self._repo.unit_of_work() as session:
             return self._repo.written_off_refs(session)

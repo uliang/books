@@ -89,9 +89,16 @@ class LedgerRepository(Repository):
             row.code = code
 
     def lock_period(self, session: Session, period: str, *, kind: str) -> None:
-        """Record a period lock (ADR-0009). Idempotent."""
-        if not self.is_period_locked(session, period):
+        """Record or upgrade a period lock (ADR-0009). Inserts a new lock, or
+        upgrades an existing soft lock to hard; never downgrades, idempotent on
+        a repeat of the same kind."""
+        row = session.execute(
+            select(_PeriodClose).where(_PeriodClose.period == period)
+        ).scalar_one_or_none()
+        if row is None:
             session.add(_PeriodClose(period=period, kind=kind))
+        elif row.kind == "soft" and kind == "hard":
+            row.kind = "hard"
 
     def append_entry(
         self,
@@ -142,14 +149,6 @@ class LedgerRepository(Repository):
                     )
 
     # --- queries --------------------------------------------------------
-
-    def is_period_locked(self, session: Session, period: str) -> bool:
-        return (
-            session.execute(
-                select(_PeriodClose).where(_PeriodClose.period == period)
-            ).scalar_one_or_none()
-            is not None
-        )
 
     def period_state(self, session: Session, period: str) -> PeriodState:
         """The close state of a period: OPEN (no lock), SOFT, or HARD."""

@@ -29,6 +29,7 @@ from books.expense_management.events import (
     OwnerPaidExpenseRecorded,
     OwnerReimbursed,
 )
+from books.general_ledger.period_lifecycle import PeriodState, on_soft_close
 from books.general_ledger.persistence.repository import LedgerRepository
 from books.invoicing.events import (
     InvoiceIssued,
@@ -151,12 +152,12 @@ class LedgerService:
             self._repo.upsert_role(session, role, code)
 
     def soft_close(self, period: str) -> None:
-        """Lock ``period`` (YYYY-MM) against new economic entries (ADR-0009).
-
-        Never blocks on uncleared bank postings — clearance is the
-        orthogonal axis and is deliberately not consulted here. Idempotent.
-        """
+        """Lock ``period`` (YYYY-MM) against casual economic entries; guarded
+        guided-journal corrections and reconciliation still pass (ADR-0009,
+        amended). Never blocks on uncleared items; idempotent on a soft
+        period; rejects a period already hard-closed."""
         with self._repo.unit_of_work() as session:
+            on_soft_close(self._repo.period_state(session, period))  # rejects HARD
             self._repo.lock_period(session, period, kind="soft")
 
     def write_off(self, posting_ref: int, on: date) -> None:
@@ -195,6 +196,8 @@ class LedgerService:
             )
         on = date(year, 12, 31)
         with self._repo.unit_of_work() as session:
+            if self._repo.period_state(session, f"{year:04d}-12") is PeriodState.HARD:
+                raise ValueError(f"hard close {year}: already closed")
             balances = self._repo.pnl_balances(session)
             legs: list[tuple[str, int, dict[str, tuple[str, str]] | None]] = []
             net = 0

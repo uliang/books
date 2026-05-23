@@ -67,3 +67,26 @@ def test_mark_paid_publishes_payment_recorded():
             paid_on=date(2026, 1, 15),
         )
     ]
+
+
+def test_list_invoices_returns_rows_with_resolved_party_name():
+    svc, _ = _invoicing()
+    svc.issue_invoice(
+        number=7,
+        party_id=42,
+        amount=Money.myr(500_00),
+        issued_on=date(2026, 3, 1),
+    )
+
+    rows = svc.list_invoices()
+
+    assert len(rows) == 1
+    (row,) = rows
+    assert row.number == 7
+    assert row.party_id == 42
+    assert row.party_name == "Acme"  # resolved via the injected resolver
+    assert row.currency == "MYR"
+    assert row.amount_minor == 500_00
+    assert row.carrying_minor == 500_00
+    assert row.banked_minor is None
+    assert row.status == "issued"

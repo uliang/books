@@ -18,6 +18,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from books.general_ledger.period_lifecycle import PeriodState, may_post
 from books.general_ledger.persistence.tables import (
     _Account,
     _AccountRole,
@@ -106,8 +107,12 @@ class LedgerRepository(Repository):
         ``ValueError`` if the target period is closed (ADR-0009 invariant
         lives with the write that violates it)."""
         period = period_of(on)
-        if self.is_period_locked(session, period):
-            raise ValueError(f"period {period} is closed: cannot post on {on}")
+        state = self.period_state(session, period)
+        if not may_post(state, source_kind):
+            raise ValueError(
+                f"period {period} is {state.value}-closed: "
+                f"cannot post {source_kind} on {on}"
+            )
         entry = _Entry(
             date=on,
             narrative=narrative,
@@ -145,6 +150,15 @@ class LedgerRepository(Repository):
             ).scalar_one_or_none()
             is not None
         )
+
+    def period_state(self, session: Session, period: str) -> PeriodState:
+        """The close state of a period: OPEN (no lock), SOFT, or HARD."""
+        row = session.execute(
+            select(_PeriodClose).where(_PeriodClose.period == period)
+        ).scalar_one_or_none()
+        if row is None:
+            return PeriodState.OPEN
+        return PeriodState.SOFT if row.kind == "soft" else PeriodState.HARD
 
     def list_period_locks(self, session: Session) -> list[tuple[str, str]]:
         """Every locked period and its kind (soft/hard), period-ordered."""

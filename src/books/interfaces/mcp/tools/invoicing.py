@@ -46,3 +46,34 @@ def register(mcp: FastMCP, books: App) -> None:
             rate=rate_from_bp(rate_bp),
         )
         return {"invoice_id": inv.id, "number": inv.number}
+
+    @mcp.tool()
+    def mark_paid(
+        invoice_id: int,
+        paid_on: str,
+        banked_minor: int | None = None,
+        banked_currency: str = "MYR",
+    ) -> dict:
+        """Mark an invoice paid — the owner's assertion that funds were seen
+        (CONTEXT / ADR-0004). Posts Dr Bank / Cr AR via PaymentRecorded.
+
+        `banked_minor=None` means the full MYR carrying value landed (the
+        domestic case). For a foreign invoice that banked fewer MYR, pass the
+        actual MYR received; the shortfall stays open and the returned status
+        is "awaiting_adjudication" (ADR-0005). Otherwise the status is "paid".
+        """
+        banked = (
+            money_from_minor(banked_minor, banked_currency)
+            if banked_minor is not None
+            else None
+        )
+        books.invoicing.mark_paid(
+            invoice_id=invoice_id,
+            paid_on=date_from(paid_on),
+            banked=banked,
+        )
+        picture = books.invoicing.settlement_picture(invoice_id)
+        status = (
+            "paid" if picture.shortfall.minor_units <= 0 else "awaiting_adjudication"
+        )
+        return {"status": status}

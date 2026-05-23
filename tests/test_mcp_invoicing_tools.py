@@ -56,3 +56,67 @@ def test_issue_invoice_tool_returns_id_and_books_ar():
     run(scenario())
     assert app.ledger.account_balance(code="AR") == Money.myr(500_000)
     assert app.ledger.account_balance(code="Revenue") == Money.myr(-500_000)
+
+
+def test_mark_paid_full_returns_paid_status():
+    from datetime import date
+
+    app = create_app("sqlite://")
+    _chart(app)
+    customer = app.party.register_party(name="Acme", role="customer")
+    inv = app.invoicing.issue_invoice(
+        number=1,
+        party_id=customer.id,
+        amount=Money.myr(500_000),
+        issued_on=date(2026, 2, 1),
+    )
+
+    async def scenario():
+        async with mcp_client(app) as client:
+            result = await client.call_tool(
+                "mark_paid",
+                {"invoice_id": inv.id, "paid_on": "2026-02-20"},
+            )
+            assert result.isError is False
+            assert json.loads(result.content[0].text)["status"] == "paid"
+
+    run(scenario())
+    assert app.ledger.account_balance(code="AR") == Money.myr(0)
+    assert app.ledger.account_balance(code="Bank") == Money.myr(500_000)
+
+
+def test_mark_paid_short_returns_awaiting_adjudication():
+    from datetime import date
+    from decimal import Decimal
+
+    from books.platform.money import Currency
+
+    app = create_app("sqlite://")
+    _chart(app)
+    customer = app.party.register_party(name="Acme", role="customer")
+    # SGD 1,000 @ 3.20 → carrying MYR 3,200.
+    inv = app.invoicing.issue_invoice(
+        number=1,
+        party_id=customer.id,
+        amount=Money(100_000, Currency.SGD),
+        issued_on=date(2026, 1, 10),
+        rate=Decimal("3.20"),
+    )
+
+    async def scenario():
+        async with mcp_client(app) as client:
+            result = await client.call_tool(
+                "mark_paid",
+                {
+                    "invoice_id": inv.id,
+                    "paid_on": "2026-01-20",
+                    "banked_minor": 318_000,  # MYR 3,180 — MYR 20 short
+                },
+            )
+            assert result.isError is False
+            assert (
+                json.loads(result.content[0].text)["status"] == "awaiting_adjudication"
+            )
+
+    run(scenario())
+    assert app.ledger.account_balance(code="AR") == Money.myr(20_00)

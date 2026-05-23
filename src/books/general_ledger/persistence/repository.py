@@ -146,6 +146,15 @@ class LedgerRepository(Repository):
             is not None
         )
 
+    def list_period_locks(self, session: Session) -> list[tuple[str, str]]:
+        """Every locked period and its kind (soft/hard), period-ordered."""
+        return [
+            (row.period, row.kind)
+            for row in session.execute(
+                select(_PeriodClose).order_by(_PeriodClose.period)
+            ).scalars()
+        ]
+
     def find_role(self, session: Session, role: str) -> str | None:
         return session.execute(
             select(_AccountRole.code).where(_AccountRole.role == role)

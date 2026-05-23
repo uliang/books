@@ -90,6 +90,14 @@ class Account:
     control: bool
 
 
+@dataclass(frozen=True, slots=True)
+class PeriodLockView:
+    """A closed period and its kind (soft/hard) — a read view, no behaviour."""
+
+    period: str
+    kind: str
+
+
 class LedgerService:
     def __init__(
         self,
@@ -330,6 +338,14 @@ class LedgerService:
             return [
                 Account(code=r.code, name=r.name, type=r.type, control=r.control)
                 for r in self._repo.list_accounts(session)
+            ]
+
+    def locked_periods(self) -> list[PeriodLockView]:
+        """Every closed period and its kind (soft/hard), period-ordered."""
+        with self._repo.unit_of_work() as session:
+            return [
+                PeriodLockView(period=period, kind=kind)
+                for period, kind in self._repo.list_period_locks(session)
             ]
 
     def account_balance(self, code: str) -> Money:

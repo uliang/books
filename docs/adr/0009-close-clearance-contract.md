@@ -22,3 +22,15 @@ reality.
 
 This is a core-domain contract: it defines how the control (Reconciliation)
 and the system-of-record (Ledger) interact across time boundaries.
+
+## Amendment (2026-05-23): full reconciliation gates the hard close
+
+The "timing difference carries across the boundary and does not block" provision
+is removed. A late bank statement shares its transaction's date, so it reconciles
+the original period once it arrives — you wait for it, reconcile, then close. The
+annual hard close therefore requires **full** reconciliation: every bank posting
+must be matched to a statement or written off; *any* uncleared item blocks,
+regardless of age. Clearance remains exempt from the *soft* lock but is
+**forbidden under hard** (a hard-closed period is settled — `confirm_match`
+refuses it). The timing/stale classification survives only as mid-year reporting
+triage, no longer as a gate.

@@ -97,7 +97,9 @@ class Account:
 
 @dataclass(frozen=True, slots=True)
 class PeriodLockView:
-    """A closed period and its kind (soft/hard) — a read view, no behaviour."""
+    """A closed period and its kind. The kind now carries behaviour (see
+    ``period_lifecycle``): soft permits guarded guided-journal corrections and
+    reconciliation; hard permits neither."""
 
     period: str
     kind: str

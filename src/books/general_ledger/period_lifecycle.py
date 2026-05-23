@@ -34,7 +34,7 @@ def may_post(state: PeriodState, source_kind: str) -> bool:
 
 def may_reconcile(state: PeriodState) -> bool:
     """May a clearance match be confirmed against a posting in `state`?
-    Forbidden once the period is hard-closed and fully settled."""
+    Forbidden once the period is hard-closed — the year is then immutable."""
     return state is not PeriodState.HARD
 
 
@@ -46,7 +46,8 @@ def on_soft_close(state: PeriodState) -> PeriodState:
 
 
 def on_hard_close(state: PeriodState) -> PeriodState:
-    """Transition for hard_close. Open/Soft → Hard; Hard rejects (already closed)."""
+    """Transition for hard_close. Open/Soft → Hard (soft-close is not a
+    prerequisite — Open may go straight to Hard); Hard rejects (already closed)."""
     if state is PeriodState.HARD:
         raise ValueError("period already hard-closed")
     return PeriodState.HARD

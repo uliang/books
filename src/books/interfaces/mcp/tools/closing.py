@@ -14,6 +14,7 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from books import App
+from books.interfaces.mcp.forms import date_from
 
 
 def register(mcp: FastMCP, books: App) -> None:
@@ -24,3 +25,12 @@ def register(mcp: FastMCP, books: App) -> None:
         path. Idempotent; never blocks on uncleared items (ADR-0009)."""
         books.ledger.soft_close(period)
         return {"status": "soft_closed", "period": period}
+
+    @mcp.tool()
+    def write_off(posting_ref: int, on: str) -> dict:
+        """Write off a phantom bank posting (ADR-0006): a guided-journal
+        Dr Write-off / Cr Bank reversal. Once recorded, the posting no
+        longer appears among the year-end hard-close blockers. An unknown
+        posting_ref surfaces as an error."""
+        books.ledger.write_off(posting_ref=posting_ref, on=date_from(on))
+        return {"status": "written_off", "posting_ref": posting_ref}

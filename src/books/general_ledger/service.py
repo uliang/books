@@ -196,6 +196,8 @@ class LedgerService:
             )
         on = date(year, 12, 31)
         with self._repo.unit_of_work() as session:
+            # December HARD ⟺ the whole year is closed: the loop below locks
+            # all 12 months atomically, so no partial-hard year can exist.
             if self._repo.period_state(session, f"{year:04d}-12") is PeriodState.HARD:
                 raise ValueError(f"hard close {year}: already closed")
             balances = self._repo.pnl_balances(session)

@@ -7,11 +7,13 @@ authors = [{ name = "Tang U-Liang", email = "uliang6482@gmail.com" }]
 requires-python = ">=3.13"
 dependencies = [
     "flask>=3.1.3",
+    "mcp>=1.2.0",
     "sqlalchemy>=2.0.36",
 ]
 
 [project.scripts]
 books = "books:main"
+books-mcp = "books.interfaces.mcp.app:main"
 books-web = "books.interfaces.web.app:main"
 
 [build-system]
@@ -39,6 +41,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --timeout=30"
+pythonpath = ["tests"]
 
 # Enforced context boundaries (ADR-0013). Boundary violations fail the gate.
 # Run: `uv run lint-imports`. Table ownership stays a runtime-SQL convention
@@ -150,13 +153,11 @@ name = "interfaces touches only the service seam (no platform plumbing)"
 type = "forbidden"
 source_modules = ["books.interfaces"]
 forbidden_modules = ["books.platform.db", "books.platform.events"]
-ignore_imports = [
-    # The composition root (books) imports platform plumbing — that is
-    # correct by design and governed by the 'platform is plumbing' contract.
-    # The transitive path books.interfaces -> books -> books.platform.* is
-    # sanctioned; only a *direct* interfaces -> platform edge is prohibited.
-    "books.interfaces.web.app -> books",
-]
+# Only flag DIRECT imports of platform plumbing from interfaces. Indirect
+# paths via the composition root (books -> books.platform.*) are sanctioned
+# by design — interfaces SHOULD reach the platform through the composition
+# root, not around it. Same knob the reporting/persistence contract uses.
+allow_indirect_imports = "True"
 
 [tool.djlint]
 profile = "jinja"

@@ -82,6 +82,14 @@ class PostingView:
     party_name: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class Account:
+    code: str
+    name: str
+    type: str
+    control: bool
+
+
 class LedgerService:
     def __init__(
         self,
@@ -316,6 +324,13 @@ class LedgerService:
         """The code currently mapped to a well-known posting role."""
         with self._repo.unit_of_work() as session:
             return self._repo.role_code(session, role)
+
+    def accounts(self) -> list[Account]:
+        with self._repo.unit_of_work() as session:
+            return [
+                Account(code=r.code, name=r.name, type=r.type, control=r.control)
+                for r in self._repo.list_accounts(session)
+            ]
 
     def account_balance(self, code: str) -> Money:
         with self._repo.unit_of_work() as session:

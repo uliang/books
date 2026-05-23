@@ -16,6 +16,7 @@ from books.platform.db import Database
 class Party:
     id: int
     name: str
+    role: str
 
 
 class PartyService:
@@ -25,11 +26,16 @@ class PartyService:
     def register_party(self, name: str, role: str) -> Party:
         with self._repo.unit_of_work() as session:
             row = self._repo.add(session, name=name, role=role)
-            return Party(id=row.id, name=row.name)
+            return Party(id=row.id, name=row.name, role=row.role)
 
     def get(self, party_id: int) -> Party:
         with self._repo.unit_of_work() as session:
             row = self._repo.get(session, party_id)
             if row is None:
                 raise LookupError(f"no party {party_id}")
-            return Party(id=row.id, name=row.name)
+            return Party(id=row.id, name=row.name, role=row.role)
+
+    def list(self) -> list[Party]:
+        with self._repo.unit_of_work() as session:
+            rows = self._repo.list_all(session)
+            return [Party(id=r.id, name=r.name, role=r.role) for r in rows]

@@ -34,3 +34,28 @@ def register(mcp: FastMCP, books: App) -> None:
         posting_ref surfaces as an error."""
         books.ledger.write_off(posting_ref=posting_ref, on=date_from(on))
         return {"status": "written_off", "posting_ref": posting_ref}
+
+    @mcp.tool()
+    def hard_close(year: int) -> dict:
+        """Annual hard close (ADR-0008 / ADR-0009). Pre-checks the year-end
+        blockers: if any stale uncleared item remains, returns a structured
+        "blocked" result listing them — the agent guides the owner to write
+        each off or adjudicate; the system never auto-decides (ADR-0019).
+        Otherwise sweeps net P&L to Owner's Equity via the guided-journal
+        path, locks all 12 months, and the fiscal year becomes immutable."""
+        blockers = books.reporting.year_end_blockers(year)
+        if blockers:
+            return {
+                "status": "blocked",
+                "blockers": [
+                    {
+                        "ref": b.ref,
+                        "amount_minor": b.amount.minor_units,
+                        "currency": b.amount.currency.value,
+                        "age_days": b.age_days,
+                    }
+                    for b in blockers
+                ],
+            }
+        books.ledger.hard_close(year)
+        return {"status": "closed", "year": year}

@@ -396,4 +396,4 @@ class LedgerService:
         ref returns True so confirm_match surfaces its own error."""
         with self._repo.unit_of_work() as session:
             state = self._repo.posting_period_state(session, posting_ref)
-        return True if state is None else may_reconcile(state)
+            return True if state is None else may_reconcile(state)

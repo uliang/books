@@ -248,6 +248,16 @@ class LedgerRepository(Repository):
             for r in rows
         ]
 
+    def posting_period_state(
+        self, session: Session, posting_ref: int
+    ) -> PeriodState | None:
+        """The close state of the period a posting falls in, or None if the
+        posting does not exist."""
+        posting = session.get(_Posting, posting_ref)
+        if posting is None:
+            return None
+        return self.period_state(session, period_of(posting.date))
+
     def get_posting(self, session: Session, posting_ref: int) -> PostingRow | None:
         row = session.get(_Posting, posting_ref)
         if row is None:

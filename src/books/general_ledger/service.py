@@ -29,7 +29,11 @@ from books.expense_management.events import (
     OwnerPaidExpenseRecorded,
     OwnerReimbursed,
 )
-from books.general_ledger.period_lifecycle import PeriodState, on_soft_close
+from books.general_ledger.period_lifecycle import (
+    PeriodState,
+    may_reconcile,
+    on_soft_close,
+)
 from books.general_ledger.persistence.repository import LedgerRepository
 from books.invoicing.events import (
     InvoiceIssued,
@@ -384,3 +388,12 @@ class LedgerService:
         own Cr Bank reversal legs (see the repository method for detail)."""
         with self._repo.unit_of_work() as session:
             return self._repo.written_off_refs(session)
+
+    def posting_is_reconcilable(self, posting_ref: int) -> bool:
+        """Whether a clearance match may still be confirmed against this
+        posting: true unless its period is hard-closed (ADR-0009 amended).
+        Bank Reconciliation consults this before confirm_match. An unknown
+        ref returns True so confirm_match surfaces its own error."""
+        with self._repo.unit_of_work() as session:
+            state = self._repo.posting_period_state(session, posting_ref)
+        return True if state is None else may_reconcile(state)

@@ -71,9 +71,11 @@ class BankReconciliationService:
         self,
         db: Database,
         bank_postings: Callable[[str], list[PostingView]],
+        posting_is_reconcilable: Callable[[int], bool] = lambda _ref: True,
     ) -> None:
         self._repo = BankReconciliationRepository(db)
         self._bank_postings = bank_postings
+        self._posting_is_reconcilable = posting_is_reconcilable
 
     # --- import ACL (ADR-0018) -----------------------------------------
 
@@ -168,6 +170,11 @@ class BankReconciliationService:
     # --- confirm (sole write, ADR-0015) --------------------------------
 
     def confirm_match(self, statement_line_ref: int, ledger_posting_ref: int) -> None:
+        if not self._posting_is_reconcilable(ledger_posting_ref):
+            raise ValueError(
+                f"cannot reconcile posting {ledger_posting_ref}: "
+                "its period is hard-closed"
+            )
         with self._repo.unit_of_work() as session:
             if (
                 self._repo.find_match(

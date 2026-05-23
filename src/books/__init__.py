@@ -48,7 +48,9 @@ def create_app(db_url: str = "sqlite://", stale_after_days: int = 30) -> App:
         db, bus, party_name=lambda pid: party.get(pid).name
     )
     recon = BankReconciliationService(
-        db, bank_postings=lambda account: ledger.postings_for(code=account)
+        db,
+        bank_postings=lambda account: ledger.postings_for(code=account),
+        posting_is_reconcilable=lambda ref: ledger.posting_is_reconcilable(ref),
     )
     reporting = ReportingService(
         ledger=ledger, recon=recon, stale_after_days=stale_after_days

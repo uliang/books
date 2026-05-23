@@ -2,8 +2,8 @@
 close (ADR-0008 / ADR-0009).
 
 - closings:// — every locked period and its kind (soft/hard).
-- year-end-blockers://{year} — stale uncleared bank postings standing in
-  the way of the annual hard close.
+- year-end-blockers://{year} — every uncleared bank posting standing in
+  the way of the annual hard close (each classified timing/stale).
 """
 
 from __future__ import annotations
@@ -28,8 +28,9 @@ def register(mcp: FastMCP, books: App) -> None:
 
     @mcp.resource("year-end-blockers://{year}")
     def year_end_blockers(year: str) -> str:
-        """Stale uncleared bank postings blocking the {year} hard close.
-        Path params arrive as strings, so coerce to int before lookup."""
+        """Every uncleared bank posting blocking the {year} hard close, each
+        classified timing/stale for triage. Path params arrive as strings, so
+        coerce to int before lookup."""
         return json.dumps(
             [
                 {

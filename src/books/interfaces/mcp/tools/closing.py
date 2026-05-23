@@ -38,7 +38,7 @@ def register(mcp: FastMCP, books: App) -> None:
     @mcp.tool()
     def hard_close(year: int) -> dict:
         """Annual hard close (ADR-0008 / ADR-0009). Pre-checks the year-end
-        blockers: if any stale uncleared item remains, returns a structured
+        blockers: if any uncleared bank posting remains, returns a structured
         "blocked" result listing them — the agent guides the owner to write
         each off or adjudicate; the system never auto-decides (ADR-0019).
         Otherwise sweeps net P&L to Owner's Equity via the guided-journal

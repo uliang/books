@@ -276,10 +276,18 @@ class LedgerRepository(Repository):
         )
 
     def written_off_refs(self, session: Session) -> set[int]:
-        """Bank-posting refs resolved by a guided-journal write-off."""
-        ids = (
+        """Bank-posting refs resolved by a guided-journal write-off.
+
+        Returns the refs of (a) the original bank postings that were written
+        off (parsed from the ``writeoff:<ref>`` source_id) *and* (b) every
+        bank posting that belongs to a write-off guided-journal entry itself
+        (the Cr Bank counterpart leg).  Both sets must be excluded from
+        ``year_end_blockers`` because neither represents an open reconciling
+        item: the first was the phantom and the second is its accounting
+        reversal."""
+        write_off_entries: list[_Entry] = (
             session.execute(
-                select(_Entry.source_id).where(
+                select(_Entry).where(
                     _Entry.source_kind == "GuidedJournal",
                     _Entry.source_id.like("writeoff:%"),
                 )
@@ -287,7 +295,31 @@ class LedgerRepository(Repository):
             .scalars()
             .all()
         )
-        return {int(sid.split(":", 1)[1]) for sid in ids}
+        if not write_off_entries:
+            return set()
+
+        # (a) original written-off posting refs (from the source_id tag)
+        original_refs: set[int] = {
+            int(e.source_id.split(":", 1)[1]) for e in write_off_entries
+        }
+
+        # (b) bank postings that are the Cr leg inside write-off entries
+        entry_ids = [e.id for e in write_off_entries]
+        bank_role = self.find_role(session, "bank")
+        counterpart_refs: set[int] = set()
+        if bank_role is not None:
+            counterpart_refs = set(
+                session.execute(
+                    select(_Posting.id).where(
+                        _Posting.entry_id.in_(entry_ids),
+                        _Posting.account_code == bank_role,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        return original_refs | counterpart_refs
 
     def pnl_balances(self, session: Session) -> dict[str, int]:
         """Signed minor-unit balance per income/expense account that has any

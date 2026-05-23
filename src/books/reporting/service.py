@@ -105,10 +105,11 @@ class ReportingService:
         )
 
     def year_end_blockers(self, year: int) -> list[ReconcilingItem]:
-        """Uncleared bank postings that block the annual hard close
-        (ADR-0009): stale exceptions as of year-end that are neither
-        matched nor written off. Timing differences are legitimate
-        year-end reconciling items and do not block."""
+        """Every uncleared bank posting standing in the way of the annual hard
+        close (ADR-0009, amended): any posting neither matched to a statement
+        nor written off blocks, regardless of age. Each carries a timing/stale
+        classification by age purely as owner-facing triage — the
+        classification no longer gates."""
         year_end = date(year, 12, 31)
         matched = self._recon.matched_posting_refs()
         written_off = self._ledger.written_off_refs()
@@ -117,13 +118,15 @@ class ReportingService:
             if p.ref in matched or p.ref in written_off:
                 continue
             age = (year_end - p.date).days
-            if age > self._stale_after_days:
-                blockers.append(
-                    ReconcilingItem(
-                        ref=p.ref,
-                        amount=p.amount,
-                        age_days=age,
-                        classification=STALE_EXCEPTION,
-                    )
+            classification = (
+                STALE_EXCEPTION if age > self._stale_after_days else TIMING_DIFFERENCE
+            )
+            blockers.append(
+                ReconcilingItem(
+                    ref=p.ref,
+                    amount=p.amount,
+                    age_days=age,
+                    classification=classification,
                 )
+            )
         return blockers

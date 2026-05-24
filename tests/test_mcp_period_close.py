@@ -94,7 +94,8 @@ def test_soft_close_locks_month_via_mcp():
             )
             assert {"period": "2026-03", "kind": "soft"} in rows
 
-            # A new economic entry dated into the locked month is rejected.
+            # A new economic entry dated into the locked month is rejected
+            # with a structured dict (not an isError result).
             rejected = await client.call_tool(
                 "issue_invoice",
                 {
@@ -105,9 +106,11 @@ def test_soft_close_locks_month_via_mcp():
                     "issued_on": "2026-03-15",
                 },
             )
-            assert rejected.isError is True
-            text = rejected.content[0].text
-            assert "2026-03" in text or "closed" in text.lower()
+            assert rejected.isError is False
+            payload = json.loads(rejected.content[0].text)
+            assert payload["status"] == "rejected"
+            msg = payload["message"]
+            assert "2026-03" in msg or "closed" in msg.lower()
 
     run(scenario())
 
@@ -312,5 +315,36 @@ def test_hard_close_blocked_reports_recent_item_as_timing_via_mcp():
             assert blocked["status"] == "blocked"
             assert len(blocked["blockers"]) == 1
             assert blocked["blockers"][0]["classification"] == "timing_difference"
+
+    run(scenario())
+
+
+def test_issue_invoice_into_closed_period_returns_structured_rejected():
+    app = create_app("sqlite://")
+    app.ledger.create_account(
+        code="AR", name="Accounts Receivable", type="asset", control=True
+    )
+    app.ledger.create_account(code="Revenue", name="Revenue", type="income")
+    app.party.register_party(name="Acme", role="customer")  # id 1
+    app.ledger.soft_close("2026-01")
+
+    async def scenario():
+        async with mcp_client(app) as client:
+            result = await client.call_tool(
+                "issue_invoice",
+                {
+                    "number": 1,
+                    "party_id": 1,
+                    "amount_minor": 1000_00,
+                    "currency": "MYR",
+                    "issued_on": "2026-01-15",
+                },
+            )
+            payload = json.loads(result.content[0].text)
+            assert payload["status"] == "rejected"
+            assert payload["reason"] == "period_closed"
+            assert payload["period"] == "2026-01"
+            assert payload["state"] == "soft"
+            assert "2026-01" in payload["message"]
 
     run(scenario())

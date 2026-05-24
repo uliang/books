@@ -5,6 +5,7 @@ exception and returns an error content payload.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from _mcp_helpers import mcp_client, run
@@ -63,9 +64,12 @@ def test_closed_period_surfaces_as_tool_error():
                     "on": "2026-01-05",
                 },
             )
-            assert result.isError is True
-            text = result.content[0].text
-            assert "2026-01" in text or "closed" in text.lower()
+            assert result.isError is False
+            payload = json.loads(result.content[0].text)
+            assert payload["status"] == "rejected"
+            assert payload["reason"] == "period_closed"
+            msg = payload["message"]
+            assert "2026-01" in msg or "closed" in msg.lower()
 
     run(scenario())
 

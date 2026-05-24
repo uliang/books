@@ -16,7 +16,8 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from books import App
-from books.interfaces.mcp.forms import date_from, money_from_minor
+from books.general_ledger import PeriodClosedError
+from books.interfaces.mcp.forms import date_from, money_from_minor, rejected_period
 
 
 def register(mcp: FastMCP, books: App) -> None:
@@ -37,12 +38,15 @@ def register(mcp: FastMCP, books: App) -> None:
         `amount_minor` is signed minor units (e.g. cents for MYR);
         `on` is an ISO-8601 date (YYYY-MM-DD).
         """
-        books.expense.record_owner_paid_expense(
-            party_id=party_id,
-            amount=money_from_minor(amount_minor, currency),
-            category_account=category_account,
-            on=date_from(on),
-        )
+        try:
+            books.expense.record_owner_paid_expense(
+                party_id=party_id,
+                amount=money_from_minor(amount_minor, currency),
+                category_account=category_account,
+                on=date_from(on),
+            )
+        except PeriodClosedError as exc:
+            return rejected_period(exc, "record owner-paid expense")
         return {"recorded": True}
 
     @mcp.tool()
@@ -60,12 +64,15 @@ def register(mcp: FastMCP, books: App) -> None:
         payable, no accrual. The contractor's Party (party_id) is
         mandatory provenance.
         """
-        books.expense.pay_contractor(
-            party_id=party_id,
-            amount=money_from_minor(amount_minor, currency),
-            category_account=category_account,
-            on=date_from(on),
-        )
+        try:
+            books.expense.pay_contractor(
+                party_id=party_id,
+                amount=money_from_minor(amount_minor, currency),
+                category_account=category_account,
+                on=date_from(on),
+            )
+        except PeriodClosedError as exc:
+            return rejected_period(exc, "pay contractor")
         return {"paid": True}
 
     @mcp.tool()
@@ -77,8 +84,11 @@ def register(mcp: FastMCP, books: App) -> None:
         Due to Owner is fungible (not tied to specific charges, per
         the ADR-0003 amendment).
         """
-        books.expense.reimburse_owner(
-            amount=money_from_minor(amount_minor, currency),
-            on=date_from(on),
-        )
+        try:
+            books.expense.reimburse_owner(
+                amount=money_from_minor(amount_minor, currency),
+                on=date_from(on),
+            )
+        except PeriodClosedError as exc:
+            return rejected_period(exc, "reimburse owner")
         return {"reimbursed": True}

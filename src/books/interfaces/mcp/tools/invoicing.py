@@ -16,7 +16,13 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from books import App
-from books.interfaces.mcp.forms import date_from, money_from_minor, rate_from_bp
+from books.general_ledger import PeriodClosedError
+from books.interfaces.mcp.forms import (
+    date_from,
+    money_from_minor,
+    rate_from_bp,
+    rejected_period,
+)
 
 
 def register(mcp: FastMCP, books: App) -> None:
@@ -38,13 +44,16 @@ def register(mcp: FastMCP, books: App) -> None:
         ignore `rate_bp` (the domain forces rate 1). The customer
         `party_id` is mandatory provenance.
         """
-        inv = books.invoicing.issue_invoice(
-            number=number,
-            party_id=party_id,
-            amount=money_from_minor(amount_minor, currency),
-            issued_on=date_from(issued_on),
-            rate=rate_from_bp(rate_bp),
-        )
+        try:
+            inv = books.invoicing.issue_invoice(
+                number=number,
+                party_id=party_id,
+                amount=money_from_minor(amount_minor, currency),
+                issued_on=date_from(issued_on),
+                rate=rate_from_bp(rate_bp),
+            )
+        except PeriodClosedError as exc:
+            return rejected_period(exc, "issue invoice")
         return {"invoice_id": inv.id, "number": inv.number}
 
     @mcp.tool()
@@ -67,11 +76,14 @@ def register(mcp: FastMCP, books: App) -> None:
             if banked_minor is not None
             else None
         )
-        books.invoicing.mark_paid(
-            invoice_id=invoice_id,
-            paid_on=date_from(paid_on),
-            banked=banked,
-        )
+        try:
+            books.invoicing.mark_paid(
+                invoice_id=invoice_id,
+                paid_on=date_from(paid_on),
+                banked=banked,
+            )
+        except PeriodClosedError as exc:
+            return rejected_period(exc, "record payment")
         picture = books.invoicing.settlement_picture(invoice_id)
         status = (
             "paid" if picture.shortfall.minor_units <= 0 else "awaiting_adjudication"
@@ -90,9 +102,12 @@ def register(mcp: FastMCP, books: App) -> None:
           Status → "partially_paid".
         Any other outcome raises ValueError (surfaces as an error result).
         """
-        books.invoicing.adjudicate_settlement(
-            invoice_id=invoice_id,
-            outcome=outcome,
-            on=date_from(on),
-        )
+        try:
+            books.invoicing.adjudicate_settlement(
+                invoice_id=invoice_id,
+                outcome=outcome,
+                on=date_from(on),
+            )
+        except PeriodClosedError as exc:
+            return rejected_period(exc, "adjudicate settlement")
         return {"status": "paid" if outcome == "settled_in_full" else "partially_paid"}

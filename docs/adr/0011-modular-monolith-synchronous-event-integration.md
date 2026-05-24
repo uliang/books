@@ -30,3 +30,16 @@ Considered and rejected:
   auditability and replay, but not tracer-essential. The synchronous bus can
   later gain persistence **without changing the publish/subscribe contract**
   (same events), so this is deferred, not foreclosed.
+
+## Note 2026-05-24 — how "dispatch inside the same transaction" is realized
+
+The claim that dispatch "runs inside the same transaction as the publisher" is
+realized by the command-scoped `platform.UnitOfWork` (see ADR-0013, amended
+2026-05-24): the publisher opens the `UnitOfWork`, and synchronous handlers
+read its session via `current_session()`. The bus contract is **unchanged** —
+it stays a pure synchronous pub/sub of single-argument handlers
+(`publish(event)` → `handler(event)`), with no transaction awareness, so it
+remains testable in isolation. (Between 2026-05-20 and this fix the
+per-context-repository unit of work had silently split publisher and handler
+into two transactions; the `UnitOfWork` restores the single-transaction
+guarantee.)

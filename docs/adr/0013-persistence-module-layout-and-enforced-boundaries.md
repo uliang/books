@@ -175,3 +175,49 @@ that gap before any silent erosion happens.
   are the service's signature, not row descriptions; moving them inside
   persistence would force the service to import outward through persistence
   to declare its own return types.
+
+## Amendment 2026-05-24 — the command owns the unit of work
+
+The 2026-05-20 amendment put the unit of work on each **per-context
+repository**. That quietly broke ADR-0011's "one transaction per use-case
+command": a publisher (e.g. `invoicing.issue_invoice`) opened its repo's
+session, and the synchronous handler (`general_ledger._on_invoice_issued`)
+opened a *second* repo session. The PR #4 live trial exposed the consequence —
+issuing an invoice into a closed period left a **ghost invoice** committed in
+invoicing with no matching GL posting.
+
+The mechanism, precisely: v1 runs SQLite under a `StaticPool`, so every
+repository session shares **one** physical connection. The publisher's session
+flushed the invoice, then a *nested* `unit_of_work()` (the party-name resolver)
+committed on that shared connection — committing the invoice too — before the
+GL handler rejected the post. So "two transactions" was really one connection
+with a premature commit.
+
+**The fix:** transaction ownership moves up to a command-scoped
+`platform.UnitOfWork` (`platform/unit_of_work.py`). It opens one `Session` per
+command and publishes it through a `contextvar`; `current_session()` returns
+it. Publisher commands (the three invoicing and three expense commands) open
+the `UnitOfWork`; the Ledger's six event handlers pull that session via
+`current_session()` instead of opening their own. Repository methods keep their
+`session`-first signatures unchanged. The command commits/rolls back exactly
+once, so a handler `PeriodClosedError` rolls back the whole command — no ghost
+rows.
+
+`Repository.unit_of_work()` is **retained** for read-only/query paths and the
+Ledger's self-contained command writes (`soft_close`, `hard_close`,
+`write_off`, `create_account`). The rule: *if a command publishes (or its
+handler writes), it uses the platform `UnitOfWork`.*
+
+**Constraint that falls out of the shared connection (important):** inside a
+command's `UnitOfWork`, do **not** call another context's service method that
+opens its own `unit_of_work()` and commits — on the shared `StaticPool`
+connection that nested commit would commit the command's pending work
+prematurely (the original ghost). Resolve such cross-context reads **before**
+opening the command's `UnitOfWork` (e.g. `issue_invoice` resolves the party
+name before the `with self._uow()` block). This is a convention today, not an
+enforced contract; making `Repository.unit_of_work()` re-entrant (join the
+active `UnitOfWork` instead of opening a second session) would harden it and is
+a candidate follow-up. The Postgres swap the original ADR anticipates would
+also remove the single-connection footgun (separate connections, true separate
+transactions), but the platform `UnitOfWork` is the correct structural fix
+regardless of engine.

@@ -1,7 +1,7 @@
 # Cross-Context Transaction Atomicity — Design
 
 **Date:** 2026-05-24
-**Status:** Approved (brainstorming) → ready for plan
+**Status:** Implemented (2026-05-24)
 **Amends:** ADR-0013 (persistence / transaction ownership), ADR-0011 (synchronous
 event integration). No new ADR — this *restores* their stated intent.
 **Follows:** the period-close state machine (PR #4, branch

@@ -268,23 +268,23 @@ class LedgerService:
         loss = e.fx_loss.minor_units
         if loss == 0:
             return
-        with self._repo.unit_of_work() as session:
-            ar = self._repo.role_code(session, "ar")
-            fx_loss = self._repo.role_code(session, "fx_loss")
-            party_name = self._repo.ar_party_name(session, ar, e.party_id)
-            self._repo.append_entry(
-                session,
-                on=e.on,
-                narrative=(
-                    f"Realized FX loss on settlement of invoice #{e.invoice_number}"
-                ),
-                source_kind="GuidedJournal",
-                source_id=str(e.invoice_number),
-                legs=[
-                    (fx_loss, loss, None),
-                    (ar, -loss, _party_dim(e.party_id, party_name)),
-                ],
-            )
+        session = current_session()
+        ar = self._repo.role_code(session, "ar")
+        fx_loss = self._repo.role_code(session, "fx_loss")
+        party_name = self._repo.ar_party_name(session, ar, e.party_id)
+        self._repo.append_entry(
+            session,
+            on=e.on,
+            narrative=(
+                f"Realized FX loss on settlement of invoice #{e.invoice_number}"
+            ),
+            source_kind="GuidedJournal",
+            source_id=str(e.invoice_number),
+            legs=[
+                (fx_loss, loss, None),
+                (ar, -loss, _party_dim(e.party_id, party_name)),
+            ],
+        )
 
     def _on_owner_paid_expense(self, e: OwnerPaidExpenseRecorded) -> None:
         # Recognized at the charge; the business owes the owner (ADR-0003,

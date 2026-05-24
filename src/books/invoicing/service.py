@@ -178,13 +178,13 @@ class InvoicingService:
         outcome: str,
         on: date,
     ) -> None:
-        with self._repo.unit_of_work() as session:
-            invoice = self._repo.get(session, invoice_id)
+        with self._uow() as uow:
+            invoice = self._repo.get(uow.session, invoice_id)
             if invoice is None:
                 raise LookupError(f"no invoice {invoice_id}")
             shortfall = invoice.carrying_minor - (invoice.banked_minor or 0)
             if outcome == "settled_in_full":
-                self._repo.set_status(session, invoice_id, "paid")
+                self._repo.set_status(uow.session, invoice_id, "paid")
                 # Realized FX loss, recognized only at settlement, posted by
                 # the Ledger's guided-journal path (ADR-0005/0006).
                 self._bus.publish(
@@ -197,7 +197,7 @@ class InvoicingService:
                 )
             elif outcome == "still_owes":
                 # No FX recognition: AR stays open for the shortfall.
-                self._repo.set_status(session, invoice_id, "partially_paid")
+                self._repo.set_status(uow.session, invoice_id, "partially_paid")
             else:
                 raise ValueError(f"unknown adjudication outcome: {outcome!r}")
 

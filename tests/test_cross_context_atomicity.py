@@ -5,12 +5,13 @@ rejection rolls back the whole command, leaving NO ghost rows in any context
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
 from books import create_app
 from books.general_ledger import PeriodClosedError
-from books.platform.money import Money
+from books.platform.money import Currency, Money
 
 
 def _chart(app):
@@ -44,3 +45,58 @@ def test_issue_into_closed_period_rolls_back_both_contexts():
     # general-ledger context: no postings leaked
     assert app.ledger.postings_for(code="AR") == []
     assert app.ledger.postings_for(code="Revenue") == []
+
+
+def test_mark_paid_into_closed_period_rolls_back_both_contexts():
+    app = create_app("sqlite://")
+    _chart(app)
+    acme = app.party.register_party(name="Acme", role="customer")
+    inv = app.invoicing.issue_invoice(
+        number=1,
+        party_id=acme.id,
+        amount=Money.myr(1000_00),
+        issued_on=date(2026, 2, 10),  # February: open
+    )
+    app.ledger.soft_close("2026-03")
+
+    with pytest.raises(PeriodClosedError):
+        app.invoicing.mark_paid(invoice_id=inv.id, paid_on=date(2026, 3, 5))
+
+    # No Bank posting leaked, and the invoice status stayed "issued".
+    assert app.ledger.postings_for(code="Bank") == []
+    (row,) = [i for i in app.invoicing.list_invoices() if i.id == inv.id]
+    assert row.status == "issued"
+
+
+def test_adjudicate_into_closed_period_rolls_back_both_contexts():
+    # Hard-close is the only state that rejects GuidedJournal (the source_kind
+    # used by the FX adjudication handler); soft-close still admits it per
+    # ADR-0006.  We get a hard-closed year by writing off the bank posting that
+    # would otherwise block hard_close.
+    app = create_app("sqlite://")
+    _chart(app)
+    app.ledger.create_account(code="FX Loss", name="FX Loss", type="expense")
+    acme = app.party.register_party(name="Acme", role="customer")
+    inv = app.invoicing.issue_invoice(
+        number=1,
+        party_id=acme.id,
+        amount=Money(1000_00, Currency("SGD")),
+        issued_on=date(2025, 2, 1),
+        rate=Decimal("3.0"),
+    )
+    app.invoicing.mark_paid(
+        invoice_id=inv.id, paid_on=date(2025, 2, 20), banked=Money.myr(2900_00)
+    )
+    # Clear the bank posting so hard_close(2025) can proceed.
+    (bank_posting,) = app.ledger.postings_for(code="Bank")
+    app.ledger.write_off(posting_ref=bank_posting.ref, on=date(2025, 12, 31))
+    app.ledger.hard_close(2025)
+
+    with pytest.raises(PeriodClosedError):
+        app.invoicing.adjudicate_settlement(
+            invoice_id=inv.id, outcome="settled_in_full", on=date(2025, 6, 1)
+        )
+
+    assert app.ledger.postings_for(code="FX Loss") == []
+    (row,) = [i for i in app.invoicing.list_invoices() if i.id == inv.id]
+    assert row.status == "awaiting_adjudication"

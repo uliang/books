@@ -18,7 +18,11 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from books.general_ledger.period_lifecycle import PeriodState, may_post
+from books.general_ledger.period_lifecycle import (
+    PeriodClosedError,
+    PeriodState,
+    may_post,
+)
 from books.general_ledger.persistence.tables import (
     _Account,
     _AccountRole,
@@ -116,9 +120,8 @@ class LedgerRepository(Repository):
         period = period_of(on)
         state = self.period_state(session, period)
         if not may_post(state, source_kind):
-            raise ValueError(
-                f"period {period} is {state.value}-closed: "
-                f"cannot post {source_kind} on {on}"
+            raise PeriodClosedError(
+                period=period, state=state, source_kind=source_kind, on=on
             )
         entry = _Entry(
             date=on,

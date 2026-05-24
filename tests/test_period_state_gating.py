@@ -9,6 +9,8 @@ from datetime import date
 import pytest
 
 from books import create_app
+from books.general_ledger import PeriodClosedError
+from books.general_ledger.period_lifecycle import PeriodState
 from books.platform.money import Money
 
 
@@ -70,3 +72,21 @@ def test_soft_closing_december_then_hard_close_succeeds():
     # The Dec-31 P&L sweep is a guided journal; soft December must admit it.
     app.ledger.hard_close(2026)
     assert app.ledger.account_balance(code="Owner's Equity") == Money.myr(-1500_00)
+
+
+def test_append_into_soft_month_raises_typed_period_closed_error():
+    app = create_app("sqlite://")
+    _chart(app)
+    acme = app.party.register_party(name="Acme", role="customer")
+    app.ledger.soft_close("2026-01")
+
+    with pytest.raises(PeriodClosedError) as exc:
+        app.invoicing.issue_invoice(
+            number=1,
+            party_id=acme.id,
+            amount=Money.myr(500_00),
+            issued_on=date(2026, 1, 15),
+        )
+    assert exc.value.period == "2026-01"
+    assert exc.value.state is PeriodState.SOFT
+    assert exc.value.source_kind == "InvoiceIssued"

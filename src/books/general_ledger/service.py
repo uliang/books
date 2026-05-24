@@ -324,20 +324,20 @@ class LedgerService:
 
     def _on_owner_reimbursed(self, e: OwnerReimbursed) -> None:
         amt = e.amount.minor_units
-        with self._repo.unit_of_work() as session:
-            due = self._repo.role_code(session, "due_to_owner")
-            bank = self._repo.role_code(session, "bank")
-            self._repo.append_entry(
-                session,
-                on=e.on,
-                narrative="Reimbursement to owner",
-                source_kind="OwnerReimbursed",
-                source_id=e.on.isoformat(),
-                legs=[
-                    (due, amt, None),
-                    (bank, -amt, None),
-                ],
-            )
+        session = current_session()
+        due = self._repo.role_code(session, "due_to_owner")
+        bank = self._repo.role_code(session, "bank")
+        self._repo.append_entry(
+            session,
+            on=e.on,
+            narrative="Reimbursement to owner",
+            source_kind="OwnerReimbursed",
+            source_id=e.on.isoformat(),
+            legs=[
+                (due, amt, None),
+                (bank, -amt, None),
+            ],
+        )
 
     # --- query side (a context query API, ADR-0013) ---------------------
 

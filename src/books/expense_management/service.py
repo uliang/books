@@ -70,9 +70,9 @@ class ExpenseManagementService:
 
     def reimburse_owner(self, amount: Money, on: date) -> None:
         """The business pays the owner back — any amount, partial allowed."""
-        with self._repo.unit_of_work() as session:
+        with self._uow() as uow:
             self._repo.add_owner_reimbursement(
-                session, amount_minor=amount.minor_units, on=on
+                uow.session, amount_minor=amount.minor_units, on=on
             )
             self._bus.publish(OwnerReimbursed(amount=amount, on=on))
 

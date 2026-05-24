@@ -141,3 +141,18 @@ def test_pay_contractor_into_closed_period_rolls_back_both_contexts():
 
     assert app.ledger.postings_for(code="Subcontract") == []
     assert app.ledger.postings_for(code="Bank") == []
+
+
+def test_reimburse_owner_into_closed_period_rolls_back_both_contexts():
+    app = create_app("sqlite://")
+    _chart(app)
+    app.ledger.create_account(
+        code="Due to Owner", name="Due to Owner", type="liability"
+    )
+    app.ledger.soft_close("2026-01")
+
+    with pytest.raises(PeriodClosedError):
+        app.expense.reimburse_owner(amount=Money.myr(200_00), on=date(2026, 1, 12))
+
+    assert app.ledger.postings_for(code="Due to Owner") == []
+    assert app.ledger.postings_for(code="Bank") == []

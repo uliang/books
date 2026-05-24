@@ -81,3 +81,28 @@ def test_unknown_invoice_mark_paid_flashes_not_500():
     )
     assert resp.status_code == 200
     assert "no invoice 999" in resp.get_data(as_text=True)
+
+
+def test_issue_into_closed_period_flashes_clean_message():
+    books, c = _app_client()
+    acme = _setup(books)
+    books.ledger.soft_close("2026-01")
+    resp = c.post(
+        "/invoicing/issue",
+        data={
+            "number": "1",
+            "party_id": str(acme.id),
+            "amount": "1000.00",
+            "currency": "MYR",
+            "issued_on": "2026-01-15",
+            "rate": "1",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "2026-01" in body
+    assert "closed" in body
+    # PeriodClosedError is a ValueError → existing errorhandler flashes it;
+    # the atomic UnitOfWork means no ghost invoice persisted.
+    assert books.invoicing.list_invoices() == []

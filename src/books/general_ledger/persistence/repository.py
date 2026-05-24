@@ -115,8 +115,9 @@ class LedgerRepository(Repository):
         legs: list[Leg],
     ) -> None:
         """Insert one balanced entry with its postings + dimensions. Raises
-        ``ValueError`` if the target period is closed (ADR-0009 invariant
-        lives with the write that violates it)."""
+        ``PeriodClosedError`` (a ``ValueError``) if the target period does not
+        admit this source_kind (ADR-0009 invariant lives with the write that
+        violates it)."""
         period = period_of(on)
         state = self.period_state(session, period)
         if not may_post(state, source_kind):

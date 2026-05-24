@@ -100,3 +100,25 @@ def test_adjudicate_into_closed_period_rolls_back_both_contexts():
     assert app.ledger.postings_for(code="FX Loss") == []
     (row,) = [i for i in app.invoicing.list_invoices() if i.id == inv.id]
     assert row.status == "awaiting_adjudication"
+
+
+def test_owner_paid_expense_into_closed_period_rolls_back_both_contexts():
+    app = create_app("sqlite://")
+    _chart(app)
+    app.ledger.create_account(
+        code="Due to Owner", name="Due to Owner", type="liability"
+    )
+    app.ledger.create_account(code="Office", name="Office", type="expense")
+    supplier = app.party.register_party(name="Stationers", role="supplier")
+    app.ledger.soft_close("2026-01")
+
+    with pytest.raises(PeriodClosedError):
+        app.expense.record_owner_paid_expense(
+            party_id=supplier.id,
+            amount=Money.myr(120_00),
+            category_account="Office",
+            on=date(2026, 1, 9),
+        )
+
+    assert app.ledger.postings_for(code="Office") == []
+    assert app.ledger.postings_for(code="Due to Owner") == []

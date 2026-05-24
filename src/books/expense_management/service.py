@@ -23,6 +23,7 @@ from books.expense_management.persistence.repository import ExpenseRepository
 from books.platform.db import Database
 from books.platform.events import EventBus
 from books.platform.money import Money
+from books.platform.unit_of_work import UnitOfWork
 
 
 class ExpenseManagementService:
@@ -31,10 +32,12 @@ class ExpenseManagementService:
         db: Database,
         bus: EventBus,
         party_name: Callable[[int], str],
+        unit_of_work: Callable[[], UnitOfWork] | None = None,
     ) -> None:
         self._repo = ExpenseRepository(db)
         self._bus = bus
         self._party_name = party_name
+        self._uow = unit_of_work or (lambda: UnitOfWork(db))
 
     def record_owner_paid_expense(
         self,
@@ -46,9 +49,9 @@ class ExpenseManagementService:
         """A business expense the owner paid personally — recognized now
         against Due to Owner. ``party_id`` (the supplier) is required."""
         name = self._party_name(party_id)
-        with self._repo.unit_of_work() as session:
+        with self._uow() as uow:
             self._repo.add_owner_paid_expense(
-                session,
+                uow.session,
                 party_id=party_id,
                 party_name=name,
                 amount_minor=amount.minor_units,

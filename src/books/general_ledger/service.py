@@ -290,19 +290,19 @@ class LedgerService:
         # Recognized at the charge; the business owes the owner (ADR-0003,
         # amended). Supplier Party rides the expense leg as the dimension.
         amt = e.amount.minor_units
-        with self._repo.unit_of_work() as session:
-            due = self._repo.role_code(session, "due_to_owner")
-            self._repo.append_entry(
-                session,
-                on=e.on,
-                narrative=f"Owner-paid expense: {e.party_name}",
-                source_kind="OwnerPaidExpenseRecorded",
-                source_id=str(e.party_id),
-                legs=[
-                    (e.category_account, amt, _party_dim(e.party_id, e.party_name)),
-                    (due, -amt, None),
-                ],
-            )
+        session = current_session()
+        due = self._repo.role_code(session, "due_to_owner")
+        self._repo.append_entry(
+            session,
+            on=e.on,
+            narrative=f"Owner-paid expense: {e.party_name}",
+            source_kind="OwnerPaidExpenseRecorded",
+            source_id=str(e.party_id),
+            legs=[
+                (e.category_account, amt, _party_dim(e.party_id, e.party_name)),
+                (due, -amt, None),
+            ],
+        )
 
     def _on_contractor_paid(self, e: ContractorPaid) -> None:
         # Pure cash basis (ADR-0003): no payable, the bank moves at once.

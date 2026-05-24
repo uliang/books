@@ -51,7 +51,10 @@ def create_app(db_url: str = "sqlite://", stale_after_days: int = 30) -> App:
         unit_of_work=lambda: UnitOfWork(db),
     )
     expense = ExpenseManagementService(
-        db, bus, party_name=lambda pid: party.get(pid).name
+        db,
+        bus,
+        party_name=lambda pid: party.get(pid).name,
+        unit_of_work=lambda: UnitOfWork(db),
     )
     recon = BankReconciliationService(
         db,

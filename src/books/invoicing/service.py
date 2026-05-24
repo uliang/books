@@ -30,6 +30,7 @@ from books.invoicing.persistence.repository import InvoiceRepository
 from books.platform.db import Database
 from books.platform.events import EventBus
 from books.platform.money import Currency, Money
+from books.platform.unit_of_work import UnitOfWork
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +78,12 @@ class InvoicingService:
         db: Database,
         bus: EventBus,
         party_name: Callable[[int], str],
+        unit_of_work: Callable[[], UnitOfWork] | None = None,
     ) -> None:
         self._repo = InvoiceRepository(db)
         self._bus = bus
         self._party_name = party_name
+        self._uow = unit_of_work or (lambda: UnitOfWork(db))
 
     def issue_invoice(
         self,
@@ -93,9 +96,14 @@ class InvoicingService:
         if amount.currency is Currency.MYR:
             rate = Decimal(1)
         carrying_minor = _to_myr(amount.minor_units, rate)
-        with self._repo.unit_of_work() as session:
+        # Resolve the party name before opening the UoW: the party resolver
+        # opens its own per-context session and commits it.  If that commit
+        # runs inside the UoW block it would commit the invoice INSERT too
+        # (StaticPool shares one connection), defeating the rollback guarantee.
+        party_name = self._party_name(party_id)
+        with self._uow() as uow:
             row = self._repo.add(
-                session,
+                uow.session,
                 number=number,
                 party_id=party_id,
                 amount_minor=amount.minor_units,
@@ -109,7 +117,7 @@ class InvoicingService:
                 InvoiceIssued(
                     invoice_number=number,
                     party_id=party_id,
-                    party_name=self._party_name(party_id),
+                    party_name=party_name,
                     amount=Money.myr(carrying_minor),
                     issued_on=issued_on,
                 )

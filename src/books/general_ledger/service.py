@@ -43,6 +43,7 @@ from books.invoicing.events import (
 from books.platform.db import Database
 from books.platform.events import EventBus
 from books.platform.money import Money
+from books.platform.unit_of_work import current_session
 
 # Default role → code mapping. The Chart of Accounts is an aggregate inside
 # General Ledger (CONTEXT); the codes the handlers post to are a *persisted*
@@ -228,20 +229,20 @@ class LedgerService:
 
     def _on_invoice_issued(self, e: InvoiceIssued) -> None:
         amt = e.amount.minor_units
-        with self._repo.unit_of_work() as session:
-            ar = self._repo.role_code(session, "ar")
-            revenue = self._repo.role_code(session, "revenue")
-            self._repo.append_entry(
-                session,
-                on=e.issued_on,
-                narrative=f"Invoice #{e.invoice_number} to {e.party_name}",
-                source_kind="InvoiceIssued",
-                source_id=str(e.invoice_number),
-                legs=[
-                    (ar, amt, _party_dim(e.party_id, e.party_name)),
-                    (revenue, -amt, None),
-                ],
-            )
+        session = current_session()
+        ar = self._repo.role_code(session, "ar")
+        revenue = self._repo.role_code(session, "revenue")
+        self._repo.append_entry(
+            session,
+            on=e.issued_on,
+            narrative=f"Invoice #{e.invoice_number} to {e.party_name}",
+            source_kind="InvoiceIssued",
+            source_id=str(e.invoice_number),
+            legs=[
+                (ar, amt, _party_dim(e.party_id, e.party_name)),
+                (revenue, -amt, None),
+            ],
+        )
 
     def _on_payment_recorded(self, e: PaymentRecorded) -> None:
         amt = e.amount.minor_units

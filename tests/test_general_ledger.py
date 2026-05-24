@@ -11,31 +11,34 @@ from books.invoicing.events import InvoiceIssued, PaymentRecorded
 from books.platform.db import Database
 from books.platform.events import EventBus
 from books.platform.money import Money
+from books.platform.unit_of_work import UnitOfWork
 
 
-def _ledger() -> tuple[LedgerService, EventBus]:
+def _ledger() -> tuple[LedgerService, EventBus, Database]:
+    db = Database()
     bus = EventBus()
-    ledger = LedgerService(Database(), bus)
+    ledger = LedgerService(db, bus)
     ledger.create_account(code="Bank", name="Bank", type="asset")
     ledger.create_account(
         code="AR", name="Accounts Receivable", type="asset", control=True
     )
     ledger.create_account(code="Revenue", name="Revenue", type="income")
-    return ledger, bus
+    return ledger, bus, db
 
 
 def test_invoice_issued_posts_dr_ar_cr_revenue_with_party_dimension():
-    ledger, bus = _ledger()
+    ledger, bus, db = _ledger()
 
-    bus.publish(
-        InvoiceIssued(
-            invoice_number=1,
-            party_id=42,
-            party_name="Acme",
-            amount=Money.myr(1000_00),
-            issued_on=date(2026, 1, 10),
+    with UnitOfWork(db):
+        bus.publish(
+            InvoiceIssued(
+                invoice_number=1,
+                party_id=42,
+                party_name="Acme",
+                amount=Money.myr(1000_00),
+                issued_on=date(2026, 1, 10),
+            )
         )
-    )
 
     assert ledger.account_balance(code="AR") == Money.myr(1000_00)
     assert ledger.account_balance(code="Revenue") == Money.myr(-1000_00)
@@ -44,16 +47,17 @@ def test_invoice_issued_posts_dr_ar_cr_revenue_with_party_dimension():
 
 
 def test_payment_recorded_posts_dr_bank_cr_ar_and_bank_posting_is_uncleared():
-    ledger, bus = _ledger()
-    bus.publish(
-        InvoiceIssued(
-            invoice_number=1,
-            party_id=42,
-            party_name="Acme",
-            amount=Money.myr(1000_00),
-            issued_on=date(2026, 1, 10),
+    ledger, bus, db = _ledger()
+    with UnitOfWork(db):
+        bus.publish(
+            InvoiceIssued(
+                invoice_number=1,
+                party_id=42,
+                party_name="Acme",
+                amount=Money.myr(1000_00),
+                issued_on=date(2026, 1, 10),
+            )
         )
-    )
 
     bus.publish(
         PaymentRecorded(

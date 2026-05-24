@@ -14,6 +14,7 @@ from books.invoicing.events import InvoiceIssued, PaymentRecorded
 from books.platform.db import Database
 from books.platform.events import EventBus
 from books.platform.money import Money
+from books.platform.unit_of_work import UnitOfWork
 from books.reporting.service import ReportingService
 
 
@@ -24,7 +25,8 @@ def test_fully_matched_statement_ties_out_with_zero_difference():
     ledger.create_account(code="Bank", name="Bank", type="asset")
     ledger.create_account(code="AR", name="AR", type="asset", control=True)
     ledger.create_account(code="Revenue", name="Revenue", type="income")
-    bus.publish(InvoiceIssued(1, 42, "Acme", Money.myr(1000_00), date(2026, 1, 10)))
+    with UnitOfWork(db):
+        bus.publish(InvoiceIssued(1, 42, "Acme", Money.myr(1000_00), date(2026, 1, 10)))
     bus.publish(PaymentRecorded(1, 42, Money.myr(1000_00), date(2026, 1, 15)))
 
     recon = BankReconciliationService(

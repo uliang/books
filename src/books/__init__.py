@@ -16,6 +16,7 @@ from books.invoicing.service import InvoicingService
 from books.party.service import PartyService
 from books.platform.db import Database
 from books.platform.events import EventBus
+from books.platform.unit_of_work import UnitOfWork
 from books.reporting.service import ReportingService
 
 
@@ -43,7 +44,12 @@ def create_app(db_url: str = "sqlite://", stale_after_days: int = 30) -> App:
         bus,
         year_end_blockers=lambda year: reporting.year_end_blockers(year),
     )
-    invoicing = InvoicingService(db, bus, party_name=lambda pid: party.get(pid).name)
+    invoicing = InvoicingService(
+        db,
+        bus,
+        party_name=lambda pid: party.get(pid).name,
+        unit_of_work=lambda: UnitOfWork(db),
+    )
     expense = ExpenseManagementService(
         db, bus, party_name=lambda pid: party.get(pid).name
     )

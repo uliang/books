@@ -111,40 +111,40 @@ class UnitOfWork:
 `UnitOfWork` depends only on `platform.Database` — no bus reference (the contextvar
 decouples them), no context imports (platform stays plumbing).
 
-### 2. `platform/events.py` — bus dispatches on the active session
+### 2. `platform/events.py` — unchanged
+
+The bus stays a **pure** synchronous pub/sub: `publish(event)` → `handler(event)`,
+single-arg callbacks, no transaction awareness. This preserves ADR-0011's "publisher
+depends only on *publish an event*" and keeps the bus testable in isolation
+(`test_event_bus.py` is untouched). The session reaches handlers via the contextvar,
+not the bus — the two stay decoupled.
+
+### 3. Services — commands open the UoW; handlers pull the active session
+
+A writing service builds its `unit_of_work` factory from the `Database` it already
+receives (`self._uow = unit_of_work or (lambda: UnitOfWork(db))`), so the command
+transaction is no longer derived from the service's own repository. The composition
+root injects the factory explicitly; direct construction (tests) falls back to the
+default.
 
 ```python
-def publish(self, event) -> None:
-    session = current_session()          # raises if outside a UnitOfWork (fail loud)
-    for handler in self._handlers.get(type(event), ()):
-        handler(event, session)
-```
-
-Handler exceptions propagate **unchanged** so the outermost `UnitOfWork.__exit__`
-owns the rollback; the bus never swallows or re-wraps.
-
-### 3. Services — commands open the UoW; handlers receive the session
-
-A writing service is injected a `unit_of_work` factory at the composition root
-(`lambda: UnitOfWork(db)`), since the command transaction is no longer derived from
-the service's own repository.
-
-```python
-# invoicing/service.py — command
+# invoicing/service.py — command (publisher)
 def issue_invoice(self, ...):
     with self._uow() as uow:
         row = self._repo.add(uow.session, ...)
-        self._bus.publish(InvoiceIssued(...))     # GL handler joins uow.session
+        self._bus.publish(InvoiceIssued(...))     # handler joins uow.session
         return Invoice(id=row.id, number=row.number)
 
-# general_ledger/service.py — handler
-def _on_invoice_issued(self, e: InvoiceIssued, session: Session) -> None:
+# general_ledger/service.py — handler (signature unchanged; pulls the session)
+def _on_invoice_issued(self, e: InvoiceIssued) -> None:
+    session = current_session()                    # the publisher's UoW session
     self._repo.append_entry(session, ...)          # same transaction
 ```
 
-Repository methods keep their intent-named, `session`-first signatures **unchanged**
-(`append_entry(session, …)`, `add(session, …)`); only the *ownership* of the session
-moves.
+Only the **6 GL event handlers** change (drop their own `with self._repo.unit_of_work()`,
+add `session = current_session()`); their `(self, event)` signatures and all
+`bus.subscribe(...)` calls stay the same. Repository methods keep their intent-named,
+`session`-first signatures **unchanged**; only the *ownership* of the session moves.
 
 ### 4. Scope rule — reads keep their lightweight path
 
@@ -179,8 +179,10 @@ second one.** This bounds the change to the write side.
    ```
 
    A single shared helper (`rejected_period(e)`) formats this so the tools don't each
-   hand-roll the dict. The web interface gets the same typed-error catch at its
-   boundary.
+   hand-roll the dict. **The web interface needs no change** — its existing global
+   `@errorhandler(ValueError)` (`interfaces/web/app.py`) already flashes `str(exc)`,
+   and `PeriodClosedError` is a `ValueError` with a clean `__str__`. A web test
+   confirms the flash.
 
 ## Testing (TDD — tests first)
 
@@ -191,12 +193,13 @@ second one.** This bounds the change to the write side.
 - **`UnitOfWork` unit tests:** commit-on-success (publisher + handler writes both
   persist); **rollback-on-handler-failure** (a raising handler discards the
   publisher's write — the core fix); contextvar reset (after a command,
-  `current_session()` raises; sequential commands don't leak); `publish()` outside a
-  UoW raises `RuntimeError`.
-- **Bus test:** `publish` passes the active session to handlers; handler exceptions
-  propagate unchanged.
-- **Update existing tests:** period-closed assertions move from bare `ValueError`
-  text → `PeriodClosedError` (still a `ValueError` subclass; message text changes).
+  `current_session()` raises; sequential commands don't leak); `current_session()`
+  outside a UoW raises `RuntimeError`.
+- **No bus changes** → `test_event_bus.py` stays as-is (the bus is untouched).
+- **Update existing tests:** period-closed assertions stay valid because
+  `PeriodClosedError` keeps the **identical `__str__`** as the old `ValueError` and is
+  a `ValueError` subclass (so `pytest.raises(ValueError, match="2026-01")` still
+  passes). Add an MCP test for the new structured `rejected` result.
 
 ## ADR amendments
 
@@ -205,8 +208,9 @@ second one.** This bounds the change to the write side.
   operate on the provided session. Supersedes the 2026-05-20 "repository owns the
   UoW" rule *for write paths* (reads retain `Repository.unit_of_work()`).
 - **ADR-0011** — short note: the synchronous bus realizes "dispatch inside the same
-  transaction" by carrying the active session (contextvar) and dispatching
-  `(event, session)` — the guarantee the 2026-05-20 change had silently regressed.
+  transaction" because handlers run in the publisher's `UnitOfWork` and pull its
+  session via `current_session()` (contextvar) — the guarantee the 2026-05-20 change
+  had silently regressed. The bus contract itself is unchanged.
 
 ## Boundary / import-linter
 
@@ -230,14 +234,15 @@ must still pass.
 ## Files touched
 
 - **new:** `src/books/platform/unit_of_work.py`
-- `src/books/platform/events.py`
-- `src/books/general_ledger/service.py`, `period_lifecycle.py`,
-  `persistence/repository.py`, and the public re-export of `PeriodClosedError`
-- `src/books/invoicing/service.py`
-- `src/books/expense_management/service.py`
-- `src/books/__init__.py` (wire the `unit_of_work` factory into writing services)
-- `src/books/interfaces/mcp/tools/invoicing.py`, `tools/expense.py`, + the shared
-  `rejected_period` helper
-- web interface boundary catch
+- `src/books/general_ledger/service.py` (6 handlers pull `current_session()`),
+  `period_lifecycle.py` (+ `PeriodClosedError`), `persistence/repository.py`
+  (`append_entry` raises it), `general_ledger/__init__.py` (re-export)
+- `src/books/invoicing/service.py` (3 publisher commands → platform `UnitOfWork`)
+- `src/books/expense_management/service.py` (3 publisher commands → platform `UnitOfWork`)
+- `src/books/__init__.py` (inject the `unit_of_work` factory into the two writing services)
+- `src/books/interfaces/mcp/forms.py` (`rejected_period` helper),
+  `interfaces/mcp/tools/invoicing.py`, `tools/expense.py` (catch → structured result)
 - `docs/adr/0011-*.md`, `docs/adr/0013-*.md`
-- tests (new + updated per above)
+- tests (new + a web flash test)
+- **unchanged on purpose:** `platform/events.py` (bus stays pure),
+  `interfaces/web/*` (existing `ValueError` errorhandler covers it)

@@ -49,3 +49,24 @@ def test_contextvar_resets_between_sequential_commands():
         pass
     with pytest.raises(RuntimeError, match="no active UnitOfWork"):
         current_session()
+
+
+def test_failed_commit_rolls_back_and_propagates(monkeypatch):
+    db = Database()
+    with UnitOfWork(db) as uow:
+        uow.session.execute(text("CREATE TABLE t (n INTEGER)"))
+
+    with pytest.raises(RuntimeError, match="commit boom"):  # noqa: SIM117
+        with UnitOfWork(db) as uow:
+            uow.session.execute(text("INSERT INTO t VALUES (1)"))
+            exc = RuntimeError("commit boom")
+            monkeypatch.setattr(
+                uow.session, "commit", lambda: (_ for _ in ()).throw(exc)
+            )
+
+    # contextvar was reset despite the commit failure
+    with pytest.raises(RuntimeError, match="no active UnitOfWork"):
+        current_session()
+    # and the row did not persist
+    with UnitOfWork(db) as uow:
+        assert uow.session.execute(text("SELECT count(*) FROM t")).scalar_one() == 0

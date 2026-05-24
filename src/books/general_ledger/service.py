@@ -308,19 +308,19 @@ class LedgerService:
         # Pure cash basis (ADR-0003): no payable, the bank moves at once.
         # Contractor Party rides the expense leg as the dimension.
         amt = e.amount.minor_units
-        with self._repo.unit_of_work() as session:
-            bank = self._repo.role_code(session, "bank")
-            self._repo.append_entry(
-                session,
-                on=e.on,
-                narrative=f"Contractor payment: {e.party_name}",
-                source_kind="ContractorPaid",
-                source_id=str(e.party_id),
-                legs=[
-                    (e.category_account, amt, _party_dim(e.party_id, e.party_name)),
-                    (bank, -amt, None),
-                ],
-            )
+        session = current_session()
+        bank = self._repo.role_code(session, "bank")
+        self._repo.append_entry(
+            session,
+            on=e.on,
+            narrative=f"Contractor payment: {e.party_name}",
+            source_kind="ContractorPaid",
+            source_id=str(e.party_id),
+            legs=[
+                (e.category_account, amt, _party_dim(e.party_id, e.party_name)),
+                (bank, -amt, None),
+            ],
+        )
 
     def _on_owner_reimbursed(self, e: OwnerReimbursed) -> None:
         amt = e.amount.minor_units

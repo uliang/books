@@ -86,9 +86,9 @@ class ExpenseManagementService:
         """A categorized direct-bank outflow to a contractor (CONTEXT). Pure
         cash basis (ADR-0003): the expense is recognized as cash leaves."""
         name = self._party_name(party_id)
-        with self._repo.unit_of_work() as session:
+        with self._uow() as uow:
             self._repo.add_contractor_payment(
-                session,
+                uow.session,
                 party_id=party_id,
                 party_name=name,
                 amount_minor=amount.minor_units,

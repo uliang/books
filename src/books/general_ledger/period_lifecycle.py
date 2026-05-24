@@ -8,6 +8,7 @@ Bank Reconciliation clearance write both consult it.
 
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 
 GUIDED_JOURNAL = "GuidedJournal"
@@ -17,6 +18,25 @@ class PeriodState(Enum):
     OPEN = "open"
     SOFT = "soft"
     HARD = "hard"
+
+
+class PeriodClosedError(ValueError):
+    """A post was rejected because its target period does not admit this
+    source_kind (ADR-0009). Subclasses ``ValueError`` so existing ``except
+    ValueError`` sites and ``pytest.raises(ValueError, match=...)`` keep
+    working; carries structured fields for interfaces to render."""
+
+    def __init__(
+        self, *, period: str, state: PeriodState, source_kind: str, on: date
+    ) -> None:
+        self.period = period
+        self.state = state
+        self.source_kind = source_kind
+        self.on = on
+        super().__init__(
+            f"period {period} is {state.value}-closed: "
+            f"cannot post {source_kind} on {on}"
+        )
 
 
 def may_post(state: PeriodState, source_kind: str) -> bool:

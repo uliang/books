@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
+from books.general_ledger import PeriodClosedError as ReexportedPeriodClosedError
 from books.general_ledger.period_lifecycle import (
+    PeriodClosedError,
     PeriodState,
     may_post,
     may_reconcile,
@@ -47,3 +51,24 @@ def test_hard_close_transition():
     assert on_hard_close(PeriodState.SOFT) is PeriodState.HARD
     with pytest.raises(ValueError, match="already hard-closed"):
         on_hard_close(PeriodState.HARD)
+
+
+def test_period_closed_error_is_a_value_error_carrying_fields():
+    err = PeriodClosedError(
+        period="2026-01",
+        state=PeriodState.SOFT,
+        source_kind="InvoiceIssued",
+        on=date(2026, 1, 15),
+    )
+    assert isinstance(err, ValueError)
+    assert err.period == "2026-01"
+    assert err.state is PeriodState.SOFT
+    assert err.source_kind == "InvoiceIssued"
+    assert err.on == date(2026, 1, 15)
+    assert str(err) == (
+        "period 2026-01 is soft-closed: cannot post InvoiceIssued on 2026-01-15"
+    )
+
+
+def test_period_closed_error_is_re_exported_from_the_context():
+    assert ReexportedPeriodClosedError is PeriodClosedError

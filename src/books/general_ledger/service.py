@@ -246,21 +246,21 @@ class LedgerService:
 
     def _on_payment_recorded(self, e: PaymentRecorded) -> None:
         amt = e.amount.minor_units
-        with self._repo.unit_of_work() as session:
-            ar = self._repo.role_code(session, "ar")
-            bank = self._repo.role_code(session, "bank")
-            party_name = self._repo.ar_party_name(session, ar, e.party_id)
-            self._repo.append_entry(
-                session,
-                on=e.paid_on,
-                narrative=f"Payment for invoice #{e.invoice_number}",
-                source_kind="PaymentRecorded",
-                source_id=str(e.invoice_number),
-                legs=[
-                    (bank, amt, None),
-                    (ar, -amt, _party_dim(e.party_id, party_name)),
-                ],
-            )
+        session = current_session()
+        ar = self._repo.role_code(session, "ar")
+        bank = self._repo.role_code(session, "bank")
+        party_name = self._repo.ar_party_name(session, ar, e.party_id)
+        self._repo.append_entry(
+            session,
+            on=e.paid_on,
+            narrative=f"Payment for invoice #{e.invoice_number}",
+            source_kind="PaymentRecorded",
+            source_id=str(e.invoice_number),
+            legs=[
+                (bank, amt, None),
+                (ar, -amt, _party_dim(e.party_id, party_name)),
+            ],
+        )
 
     def _on_settlement_adjudicated(self, e: SettlementAdjudicated) -> None:
         # The one guarded guided-journal template for realized FX (ADR-0006):

@@ -58,15 +58,14 @@ def test_payment_recorded_posts_dr_bank_cr_ar_and_bank_posting_is_uncleared():
                 issued_on=date(2026, 1, 10),
             )
         )
-
-    bus.publish(
-        PaymentRecorded(
-            invoice_number=1,
-            party_id=42,
-            amount=Money.myr(1000_00),
-            paid_on=date(2026, 1, 15),
+        bus.publish(
+            PaymentRecorded(
+                invoice_number=1,
+                party_id=42,
+                amount=Money.myr(1000_00),
+                paid_on=date(2026, 1, 15),
+            )
         )
-    )
 
     assert ledger.account_balance(code="AR") == Money.myr(0)
     assert ledger.account_balance(code="Bank") == Money.myr(1000_00)

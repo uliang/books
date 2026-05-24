@@ -130,8 +130,8 @@ class InvoicingService:
         paid_on: date,
         banked: Money | None = None,
     ) -> None:
-        with self._repo.unit_of_work() as session:
-            invoice = self._repo.get(session, invoice_id)
+        with self._uow() as uow:
+            invoice = self._repo.get(uow.session, invoice_id)
             if invoice is None:
                 raise LookupError(f"no invoice {invoice_id}")
             # Default: the full carrying value landed (domestic case).
@@ -146,7 +146,7 @@ class InvoicingService:
                 else "awaiting_adjudication"
             )
             self._repo.record_payment(
-                session, invoice_id, banked_minor=banked_minor, status=status
+                uow.session, invoice_id, banked_minor=banked_minor, status=status
             )
             self._bus.publish(
                 PaymentRecorded(

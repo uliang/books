@@ -27,7 +27,7 @@ def test_fully_matched_statement_ties_out_with_zero_difference():
     ledger.create_account(code="Revenue", name="Revenue", type="income")
     with UnitOfWork(db):
         bus.publish(InvoiceIssued(1, 42, "Acme", Money.myr(1000_00), date(2026, 1, 10)))
-    bus.publish(PaymentRecorded(1, 42, Money.myr(1000_00), date(2026, 1, 15)))
+        bus.publish(PaymentRecorded(1, 42, Money.myr(1000_00), date(2026, 1, 15)))
 
     recon = BankReconciliationService(
         db, bank_postings=lambda a: ledger.postings_for(a)
